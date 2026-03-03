@@ -258,8 +258,10 @@ export async function detectBanners(
 
     // Minimum score threshold: filters out borderline images like game thumbnails
     // rendered at banner sizes (e.g. leovegas 1080×1080 squares at score≈11).
-    // Confirmed legitimate banners score ≥17; anything below 14 is unreliable.
-    if (score < 14) return;
+    // Promotions pages use a lower threshold (10) because promo cards in a 2-column
+    // grid render at ~350-400px — just below the 14 threshold without a class boost.
+    const minScore = pageType === 'promotions' ? 10 : 14;
+    if (score < minScore) return;
 
     banners.push({
       src:         item.src,

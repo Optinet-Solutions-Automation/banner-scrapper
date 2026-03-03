@@ -120,15 +120,10 @@ export async function scrapeWithTier(
           await page.waitForTimeout(2000);
         });
 
-        // Wait for lazy-loaded images below the fold to finish downloading.
-        // Proxy latency means lower-row promo cards can still be fetching when
-        // detectBanners() runs. Only check images wide enough to be real content.
-        await page.waitForFunction(
-          () => Array.from(document.querySelectorAll('img'))
-            .filter(img => img.getBoundingClientRect().width >= 150)
-            .every(img => img.complete),
-          { timeout: 20_000 }
-        ).catch(() => {});
+        // Extra settle time after scroll: gives proxy-fetched lazy images time to
+        // finish their HTTP requests. Keep it short (5 s) to avoid giving the page
+        // time for a redirect/JS-initiated navigation to fire and change the URL.
+        await page.waitForTimeout(5000);
 
         const promoRaw = await detectBanners(page, 'promotions');
         await takeScreenshot(page, `tier${config.tier}_promos_scraped`);
