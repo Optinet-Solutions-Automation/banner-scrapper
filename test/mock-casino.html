@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>TestCasino - Home</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; }
+header { background: #16213e; padding: 15px 40px; display: flex; align-items: center; justify-content: space-between; }
+.logo { font-size: 1.5em; font-weight: bold; color: #e94560; }
+nav a { color: #eee; text-decoration: none; margin-left: 20px; }
+/* Hero banner */
+.hero-banner {
+  width: 100%; height: 450px;
+  background: linear-gradient(135deg, #e94560, #0f3460);
+  display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+}
+.hero-banner img { width: 100%; height: 100%; object-fit: cover; position: absolute; }
+.hero-text { position: relative; z-index: 2; text-align: center; }
+.hero-text h1 { font-size: 3em; color: #fff; text-shadow: 2px 2px 8px rgba(0,0,0,0.8); }
+.hero-text p  { font-size: 1.3em; color: #ffd700; margin-top: 10px; }
+/* Promo strip */
+.promo-strip { background: #0f3460; padding: 40px; }
+.promo-strip h2 { text-align: center; margin-bottom: 20px; font-size: 1.8em; }
+.promo-cards { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+.promo-card { background: #16213e; border-radius: 10px; overflow: hidden; width: 380px; }
+.promo-card img { width: 100%; height: 220px; object-fit: cover; display: block; }
+.promo-card p { padding: 15px; color: #eee; font-size: 0.95em; }
+/* Carousel */
+.carousel-banner { width: 100%; height: 350px; position: relative; overflow: hidden; background: #0d0d1a; }
+.carousel-banner img { width: 100%; height: 100%; object-fit: cover; }
+/* Logos - should NOT be scraped */
+.providers { background: #16213e; padding: 30px; text-align: center; }
+.providers img { height: 40px; margin: 10px; opacity: 0.7; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎰 TestCasino</div>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/promotions">Promotions</a>
+    <a href="/games">Games</a>
+  </nav>
+  <!-- Logo - small, should be excluded -->
+  <img src="https://via.placeholder.com/80x40/e94560/fff?text=LOGO" alt="logo" style="height:40px;">
+</header>
+
+<!-- HERO BANNER - should be scraped -->
+<div class="hero-banner">
+  <img src="https://picsum.photos/1440/450?random=1" alt="Welcome bonus 200% up to $1000">
+  <div class="hero-text">
+    <h1>Welcome Bonus</h1>
+    <p>200% up to $1,000 on first deposit</p>
+  </div>
+</div>
+
+<!-- CAROUSEL BANNER - should be scraped -->
+<div class="carousel-banner">
+  <img src="https://picsum.photos/1440/350?random=2" alt="Free spins promotion">
+</div>
+
+<div class="promo-strip">
+  <h2>Featured Promotions</h2>
+  <div class="promo-cards">
+    <!-- PROMO CARDS - should be scraped -->
+    <div class="promo-card">
+      <img src="https://picsum.photos/380/220?random=3" alt="Weekend reload bonus">
+      <p>Weekend Reload - 50% bonus every Friday</p>
+    </div>
+    <div class="promo-card">
+      <img src="https://picsum.photos/380/220?random=4" alt="Free spins Monday">
+      <p>Monday Free Spins - 100 spins no wagering</p>
+    </div>
+    <div class="promo-card">
+      <img src="https://picsum.photos/380/220?random=5" alt="VIP cashback offer">
+      <p>VIP Cashback - Up to 20% weekly cashback</p>
+    </div>
+  </div>
+</div>
+
+<!-- GAME THUMBNAILS - should NOT be scraped (too small or excluded keywords) -->
+<div style="background:#1a1a2e;padding:30px;text-align:center;">
+  <img src="https://via.placeholder.com/150x150/333/fff?text=Game1" alt="game thumbnail 1" style="margin:5px;">
+  <img src="https://via.placeholder.com/150x150/333/fff?text=Game2" alt="game tile 2" style="margin:5px;">
+  <img src="https://via.placeholder.com/150x150/333/fff?text=Game3" alt="game tile 3" style="margin:5px;">
+</div>
+
+<!-- PAYMENT ICONS - should NOT be scraped -->
+<div class="providers">
+  <p style="margin-bottom:15px;">Payment Methods</p>
+  <img src="https://via.placeholder.com/80x30/555/fff?text=VISA" alt="payment visa">
+  <img src="https://via.placeholder.com/80x30/555/fff?text=MC" alt="payment mastercard">
+  <img src="https://via.placeholder.com/80x30/555/fff?text=PayPal" alt="payment paypal">
+</div>
+
+<footer style="background:#0d0d1a;padding:20px;text-align:center;color:#888;font-size:0.85em;">
+  <p>TestCasino © 2024 | 18+ | Gamble Responsibly | Licensed & Regulated</p>
+  <p style="margin-top:5px;">This is a test page for the banner scraper. All images are placeholders.</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,45 @@
+# Google Cloud Build config for Cloud Run deployment
+# Usage: gcloud builds submit --config cloudbuild.yaml
+# Or: connect this repo in Cloud Build triggers for CI/CD
+
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/banner-scraper:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/banner-scraper:latest'
+      - '.'
+
+  # Push to Google Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - push
+      - '--all-tags'
+      - 'gcr.io/$PROJECT_ID/banner-scraper'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - banner-scraper
+      - '--image=gcr.io/$PROJECT_ID/banner-scraper:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=2Gi'
+      - '--cpu=2'
+      - '--concurrency=1'
+      - '--timeout=3600'
+      - '--min-instances=0'
+      - '--max-instances=1'
+      # Pass secrets as env vars — set these in Cloud Run or Secret Manager:
+      #   DC_PROXY_HOST, DC_PROXY_PORT, DC_PROXY_PROTOCOL,
+      #   DC_PROXY_USERNAME, DC_PROXY_PASSWORD, MAX_TIER
+
+images:
+  - 'gcr.io/$PROJECT_ID/banner-scraper'

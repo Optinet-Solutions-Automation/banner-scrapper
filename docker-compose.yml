@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  scraper:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: 8080
+      # Proxy — Tier 3 (Datacenter)
+      DC_PROXY_HOST: ${DC_PROXY_HOST:-}
+      DC_PROXY_PORT: ${DC_PROXY_PORT:-}
+      DC_PROXY_USERNAME: ${DC_PROXY_USERNAME:-}
+      DC_PROXY_PASSWORD: ${DC_PROXY_PASSWORD:-}
+      # Proxy — Tier 4 (Residential)
+      RES_PROXY_HOST: ${RES_PROXY_HOST:-}
+      RES_PROXY_PORT: ${RES_PROXY_PORT:-}
+      RES_PROXY_USERNAME: ${RES_PROXY_USERNAME:-}
+      RES_PROXY_PASSWORD: ${RES_PROXY_PASSWORD:-}
+      RES_PROXY_GEO_COUNTRIES: ${RES_PROXY_GEO_COUNTRIES:-US,UK,CA,AU,NZ}
+      # Output
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+      GCS_BUCKET: ${GCS_BUCKET:-}
+      GCS_PROJECT_ID: ${GCS_PROJECT_ID:-}
+      # Settings
+      MAX_TIER: ${MAX_TIER:-4}
+      TIER_RECHECK_DAYS: ${TIER_RECHECK_DAYS:-7}
+      PAGE_TIMEOUT: ${PAGE_TIMEOUT:-60000}
+      DEBUG_SCREENSHOTS: ${DEBUG_SCREENSHOTS:-true}
+      MIN_BANNER_WIDTH: ${MIN_BANNER_WIDTH:-600}
+      MIN_BANNER_HEIGHT: ${MIN_BANNER_HEIGHT:-150}
+    volumes:
+      # Persist output and site memory across restarts
+      - ./output:/app/output
+      - ./sites.json:/app/sites.json
+    # Cloud Run constraints (match prod)
+    mem_limit: 2g
+    cpus: '1'
+    shm_size: '1gb'

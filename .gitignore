@@ -1,0 +1,27 @@
+# Environment variables (contains proxy credentials — NEVER commit)
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Compiled TypeScript
+dist/
+
+# Scraped output (large files, stored in GCS)
+output/
+
+# Temporary screenshots (debug only)
+temp_screenshots/
+*.png
+
+# Site memory (persisted in GCS, not in repo)
+sites.json
+
+# Vercel
+.vercel/
+
+# OS
+.DS_Store
+Thumbs.db

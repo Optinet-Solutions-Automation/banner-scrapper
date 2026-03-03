@@ -1,0 +1,32 @@
+# Dependencies (will be reinstalled inside the container)
+node_modules/
+web/node_modules/
+
+# TypeScript build output (compiled inside Docker)
+dist/
+
+# Web frontend (deployed separately to Vercel — not part of the backend image)
+web/
+
+# Secrets (never bake credentials into the image)
+.env
+.env.local
+.env.*.local
+
+# Development artifacts
+temp_screenshots/
+output/
+sites.json
+
+# Git / editor
+.git/
+.gitignore
+.vscode/
+*.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+test/
