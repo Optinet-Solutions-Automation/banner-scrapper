@@ -119,29 +119,25 @@ export async function scrapeWithTier(
           await page.waitForLoadState('load').catch(() => {});
           await page.waitForTimeout(2000);
         });
+
+        // Wait for lazy-loaded images below the fold to finish downloading.
+        // Proxy latency means lower-row promo cards can still be fetching when
+        // detectBanners() runs. Only check images wide enough to be real content.
+        await page.waitForFunction(
+          () => Array.from(document.querySelectorAll('img'))
+            .filter(img => img.getBoundingClientRect().width >= 150)
+            .every(img => img.complete),
+          { timeout: 20_000 }
+        ).catch(() => {});
+
         const promoRaw = await detectBanners(page, 'promotions');
         await takeScreenshot(page, `tier${config.tier}_promos_scraped`);
         console.log(`  Found ${promoRaw.length} promo banner candidate(s)`);
 
-        // Deduplicate: skip promo images already downloaded from the homepage.
-        // For most URLs, strip query params to match resized CDN variants.
-        // EXCEPT Next.js image proxy (/_next/image?url=) and similar proxy paths
-        // where the query param IS the image identity — keep the full URL in those cases.
-        const normalizeUrl = (src: string) => {
-          try {
-            const u = new URL(src);
-            if (u.pathname.includes('/_next/image') || u.pathname.includes('/cdn-cgi/image')) {
-              return src; // full URL — query params are part of the image identity
-            }
-            return u.origin + u.pathname;
-          } catch { return src; }
-        };
-        const homepageUrlSet = new Set(homepageRaw.map(b => normalizeUrl(b.src)));
-        const promoDeduped = promoRaw.filter(b => !homepageUrlSet.has(normalizeUrl(b.src)));
-        const dupCount = promoRaw.length - promoDeduped.length;
-        if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} duplicate(s) already on homepage`);
-
-        promoBanners = await downloadBanners(context, promoDeduped, domain, 'promotions');
+        // No deduplication against homepage: promo cards often reuse the same
+        // artwork as homepage carousel slides (same CDN URL) but they are distinct
+        // promotional offers on a different page — we want them all.
+        promoBanners = await downloadBanners(context, promoRaw, domain, 'promotions');
       } else {
         console.log(`  ⚠ Promo page blocked: ${promoValidation.failureReason}`);
       }
