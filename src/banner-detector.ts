@@ -67,7 +67,12 @@ export async function detectBanners(
   page: Page,
   pageType: 'homepage' | 'promotions'
 ): Promise<BannerImage[]> {
-  const { minBannerWidth, minBannerHeight } = config;
+  // Promotions pages use a lower width floor so individual promo-card images
+  // (which sit inside a 2-column grid and render ~300-450px wide) are captured.
+  const minBannerWidth = pageType === 'promotions'
+    ? Math.round(config.minBannerWidth * 0.6)
+    : config.minBannerWidth;
+  const { minBannerHeight } = config;
 
   const rawImages = await page.evaluate(
     ({ minW, minH }) => {

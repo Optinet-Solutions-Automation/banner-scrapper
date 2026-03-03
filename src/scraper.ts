@@ -115,7 +115,10 @@ export async function scrapeWithTier(
       const promoValidation = await validatePageSuccess(page, config.tier);
       if (promoValidation.success) {
         await dismissPopups(page);
-        await scrollToLoadImages(page);
+        await scrollToLoadImages(page).catch(async () => {
+          await page.waitForLoadState('load').catch(() => {});
+          await page.waitForTimeout(2000);
+        });
         const promoRaw = await detectBanners(page, 'promotions');
         await takeScreenshot(page, `tier${config.tier}_promos_scraped`);
         console.log(`  Found ${promoRaw.length} promo banner candidate(s)`);
