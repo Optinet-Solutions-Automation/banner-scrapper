@@ -86,8 +86,19 @@ export async function detectBanners(
       const imgs = Array.from(document.querySelectorAll('img'));
       for (const img of imgs) {
         const rect = img.getBoundingClientRect();
-        const w = Math.round(rect.width);
-        const h = Math.round(rect.height);
+        let w = Math.round(rect.width);
+        let h = Math.round(rect.height);
+
+        // Inactive carousel slides are collapsed to 0–2 px in one dimension
+        // by the carousel CSS (e.g. height:1px on non-active Swiper slides).
+        // Their natural dimensions still reflect the real banner size — use
+        // them when the element is visually collapsed but the source image is
+        // clearly banner-sized. This captures ALL slides, not just the active one.
+        if ((h < 5 || w < 5) && img.naturalWidth >= minW && img.naturalHeight >= minH) {
+          w = img.naturalWidth;
+          h = img.naturalHeight;
+        }
+
         if (w < minW || h < minH) continue;
 
         // Resolve the best available src URL:

@@ -121,10 +121,17 @@ export async function scrapeWithTier(
           await page.waitForTimeout(2000);
         });
 
-        // Extra settle time after scroll: gives proxy-fetched lazy images time to
-        // finish their HTTP requests. Keep it short (5 s) to avoid giving the page
-        // time for a redirect/JS-initiated navigation to fire and change the URL.
-        await page.waitForTimeout(5000);
+        // Wait for promo page images to hydrate — JS-heavy promo pages (SPAs,
+        // Rails/React sites) render their cards after JS initialises, same as
+        // the homepage carousel. Use 300 px width floor to match promo cards in
+        // multi-column grids. Falls through immediately if nothing appears in 30 s.
+        await page.waitForFunction(
+          () => Array.from(document.querySelectorAll('img')).some(img => {
+            const r = img.getBoundingClientRect();
+            return r.width >= 300 && r.height >= 150;
+          }),
+          { timeout: 30_000 }
+        ).catch(() => {});
 
         const promoRaw = await detectBanners(page, 'promotions');
         await takeScreenshot(page, `tier${config.tier}_promos_scraped`);
