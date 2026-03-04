@@ -137,10 +137,26 @@ export async function scrapeWithTier(
         await takeScreenshot(page, `tier${config.tier}_promos_scraped`);
         console.log(`  Found ${promoRaw.length} promo banner candidate(s)`);
 
-        // No deduplication against homepage: promo cards often reuse the same
-        // artwork as homepage carousel slides (same CDN URL) but they are distinct
-        // promotional offers on a different page — we want them all.
-        promoBanners = await downloadBanners(context, promoRaw, domain, 'promotions');
+        // Deduplicate against homepage: skip promo images whose URL path already
+        // appeared as a homepage banner (same visual, different page context).
+        // Strip query params for comparison UNLESS the URL is a proxy path where
+        // the query string IS the image identity (Next.js /_next/image, Cloudflare
+        // /cdn-cgi/image) — in those cases use the full URL.
+        const normalizeUrl = (src: string) => {
+          try {
+            const u = new URL(src);
+            if (u.pathname.includes('/_next/image') || u.pathname.includes('/cdn-cgi/image')) {
+              return src;
+            }
+            return u.origin + u.pathname;
+          } catch { return src; }
+        };
+        const homepageUrlSet = new Set(homepageRaw.map(b => normalizeUrl(b.src)));
+        const promoDeduped = promoRaw.filter(b => !homepageUrlSet.has(normalizeUrl(b.src)));
+        const dupCount = promoRaw.length - promoDeduped.length;
+        if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} duplicate(s) already on homepage`);
+
+        promoBanners = await downloadBanners(context, promoDeduped, domain, 'promotions');
       } else {
         console.log(`  ⚠ Promo page blocked: ${promoValidation.failureReason}`);
       }

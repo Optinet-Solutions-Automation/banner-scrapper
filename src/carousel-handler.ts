@@ -1,33 +1,90 @@
 import { Page } from 'playwright';
 
 const NEXT_ARROW_SELECTORS = [
+  // ── Library-specific ──────────────────────────────────────────────────────
   '.swiper-button-next',
   '.slick-next',
   '.owl-next',
-  '[class*="carousel"] [aria-label*="next" i]',
-  '[class*="slider"] [aria-label*="next" i]',
-  'button[aria-label*="Next" i]',
+  // ── aria-label patterns ───────────────────────────────────────────────────
+  'button[aria-label*="next" i]',
+  '[aria-label*="next slide" i]',
+  '[aria-label*="forward" i]',
+  // ── Class keyword patterns (covers most custom carousels) ─────────────────
+  '[class*="arrow--next"]',      // e.g. slider__arrow--next
+  '[class*="arrow--right"]',
+  '[class*="arrow-next"]',
+  '[class*="carousel-control-next"]',  // Bootstrap
   '[class*="next-slide"]',
   '[class*="arrow-right"]',
+  '[class*="nav-next"]',
+  '[class*="btn-next"]',
+  '[class*="slide-next"]',
+  // ── Generic containers fallback ───────────────────────────────────────────
+  '[class*="carousel"] [aria-label*="next" i]',
+  '[class*="slider"] [aria-label*="next" i]',
 ];
 
 /** Click through carousel slides to ensure all banner images are loaded. */
 export async function advanceCarousels(page: Page): Promise<void> {
+  let didAdvance = false;
+
   for (const sel of NEXT_ARROW_SELECTORS) {
     try {
       const arrows = await page.$$(sel);
       for (const arrow of arrows) {
         if (!await arrow.isVisible()) continue;
-        // Click up to 6 times per carousel to cycle through slides
-        for (let i = 0; i < 6; i++) {
+        // Click up to 8 times per carousel — more time per click so slow
+        // proxy connections finish loading the new slide's image before we move on.
+        for (let i = 0; i < 8; i++) {
           await arrow.click().catch(() => {});
-          await page.waitForTimeout(600);
+          await page.waitForTimeout(1000);
         }
+        didAdvance = true;
       }
     } catch { /* selector not present */ }
   }
 
-  // Also wait a moment for auto-rotating carousels
+  // ── Pagination-dot fallback ────────────────────────────────────────────────
+  // Sites like spinsup.com use Swiper pagination bullets (◉○○○○) rather than
+  // visible arrow buttons. Click each dot to visit every slide.
+  if (!didAdvance) {
+    const dotSelectors = [
+      '.swiper-pagination-bullet',
+      '[class*="pagination-bullet"]',
+      '[class*="carousel-dot"]',
+      '[class*="slide-dot"]',
+      '[class*="dot-indicator"]',
+    ];
+    for (const sel of dotSelectors) {
+      try {
+        const dots = await page.$$(sel);
+        if (dots.length < 2) continue;
+        for (const dot of dots) {
+          if (!await dot.isVisible()) continue;
+          await dot.click().catch(() => {});
+          await page.waitForTimeout(1000); // wait for slide image to load
+        }
+        didAdvance = true;
+        break;
+      } catch { /* not found */ }
+    }
+  }
+
+  // ── Keyboard fallback ──────────────────────────────────────────────────────
+  // Last resort: focus on a carousel container and press ArrowRight.
+  if (!didAdvance) {
+    const heroSel = '[class*="swiper"],[class*="slider"],[class*="carousel"],[class*="hero"]';
+    const hero = await page.$(heroSel).catch(() => null);
+    if (hero) {
+      await hero.focus().catch(() => {});
+      for (let i = 0; i < 6; i++) {
+        await page.keyboard.press('ArrowRight');
+        await page.waitForTimeout(800);
+      }
+    }
+  }
+
+  // Let auto-rotating carousels settle
   await page.waitForTimeout(1500);
 }
 
