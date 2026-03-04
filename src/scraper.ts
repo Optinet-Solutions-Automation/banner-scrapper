@@ -9,6 +9,46 @@ import { findPromotionsUrl } from './page-navigator';
 import { downloadBanners } from './image-downloader';
 import { takeScreenshot } from './screenshot';
 
+// ── Deduplication helpers ────────────────────────────────────────────────────
+
+/** Canonical key for an image URL — strips size/quality params so the same
+ *  artwork at different resolutions maps to the same key.
+ *
+ *  - /_next/image?url=/foo.jpg&w=1293  →  /foo.jpg
+ *  - /cdn-cgi/image/w=664,h=312/https://host/foo.jpg  →  https://host/foo.jpg
+ *  - https://cdn.site.com/foo.jpg?w=1293  →  https://cdn.site.com/foo.jpg
+ */
+function imageKey(src: string): string {
+  try {
+    const u = new URL(src);
+    if (u.pathname.includes('/_next/image')) {
+      // Key is the underlying image path, not the resized URL
+      return u.searchParams.get('url') ?? (u.origin + u.pathname);
+    }
+    if (u.pathname.includes('/cdn-cgi/image/')) {
+      // /cdn-cgi/image/<opts>/<source-url> → extract source-url
+      const match = u.pathname.match(/\/cdn-cgi\/image\/[^/]+\/(https?:\/.+)/);
+      if (match) return match[1];
+    }
+    // Default: origin + pathname (strip query/hash)
+    return u.origin + u.pathname;
+  } catch { return src; }
+}
+
+/** Given a list of banner candidates that may include the same image at
+ *  multiple sizes, return only the largest version of each unique image. */
+function deduplicateByIdentity<T extends { src: string; width: number; height: number }>(items: T[]): T[] {
+  const best = new Map<string, T>();
+  for (const item of items) {
+    const key = imageKey(item.src);
+    const prev = best.get(key);
+    if (!prev || item.width * item.height > prev.width * prev.height) {
+      best.set(key, item);
+    }
+  }
+  return Array.from(best.values());
+}
+
 export interface PageScrapeResult {
   tierResult: TierResult;
   homepageBanners: BannerImage[];
@@ -96,7 +136,15 @@ export async function scrapeWithTier(
     await takeScreenshot(page, `tier${config.tier}_banners_found`);
     console.log(`  Found ${homepageRaw.length} homepage banner candidate(s)`);
 
-    const homepageBanners = await downloadBanners(context, homepageRaw, domain, 'homepage');
+    // Deduplicate within homepage: same image served at multiple sizes
+    // (e.g. hero carousel at 1293×420 + promo card grid at 664×312).
+    // Group by normalized image identity; keep the largest version of each.
+    const homepageDeduped = deduplicateByIdentity(homepageRaw);
+    if (homepageDeduped.length < homepageRaw.length) {
+      console.log(`  ↩ Homepage: removed ${homepageRaw.length - homepageDeduped.length} size-duplicate(s)`);
+    }
+
+    const homepageBanners = await downloadBanners(context, homepageDeduped, domain, 'homepage');
 
     // ── Promotions page ─────────────────────────────────────────────────────
     let promoBanners: BannerImage[] = [];
@@ -137,24 +185,12 @@ export async function scrapeWithTier(
         await takeScreenshot(page, `tier${config.tier}_promos_scraped`);
         console.log(`  Found ${promoRaw.length} promo banner candidate(s)`);
 
-        // Deduplicate against homepage: skip promo images whose URL path already
-        // appeared as a homepage banner (same visual, different page context).
-        // Strip query params for comparison UNLESS the URL is a proxy path where
-        // the query string IS the image identity (Next.js /_next/image, Cloudflare
-        // /cdn-cgi/image) — in those cases use the full URL.
-        const normalizeUrl = (src: string) => {
-          try {
-            const u = new URL(src);
-            if (u.pathname.includes('/_next/image') || u.pathname.includes('/cdn-cgi/image')) {
-              return src;
-            }
-            return u.origin + u.pathname;
-          } catch { return src; }
-        };
-        const homepageUrlSet = new Set(homepageRaw.map(b => normalizeUrl(b.src)));
-        const promoDeduped = promoRaw.filter(b => !homepageUrlSet.has(normalizeUrl(b.src)));
+        // Deduplicate within promo page, then against homepage banners.
+        const promoDeduped1 = deduplicateByIdentity(promoRaw);
+        const homepageUrlSet = new Set(homepageDeduped.map(b => imageKey(b.src)));
+        const promoDeduped = promoDeduped1.filter(b => !homepageUrlSet.has(imageKey(b.src)));
         const dupCount = promoRaw.length - promoDeduped.length;
-        if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} duplicate(s) already on homepage`);
+        if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} duplicate(s) (within promo or already on homepage)`);
 
         promoBanners = await downloadBanners(context, promoDeduped, domain, 'promotions');
       } else {
