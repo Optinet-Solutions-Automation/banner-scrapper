@@ -1,4 +1,4 @@
-import { Page } from 'playwright';
+import { Page, ElementHandle } from 'playwright';
 
 const NEXT_ARROW_SELECTORS = [
   // ── Library-specific ──────────────────────────────────────────────────────
@@ -86,6 +86,58 @@ export async function advanceCarousels(page: Page): Promise<void> {
 
   // Let auto-rotating carousels settle
   await page.waitForTimeout(1500);
+}
+
+// ── Incremental carousel API (used by scraper for progressive capture) ────────
+
+const DOT_SELECTORS = [
+  '.swiper-pagination-bullet',
+  '[class*="pagination-bullet"]',
+  '[class*="carousel-dot"]',
+  '[class*="slide-dot"]',
+  '[class*="dot-indicator"]',
+];
+
+/** Returns the first visible "next slide" arrow element, or null if none found. */
+export async function findCarouselNext(page: Page): Promise<ElementHandle | null> {
+  for (const sel of NEXT_ARROW_SELECTORS) {
+    try {
+      const els = await page.$$(sel);
+      for (const el of els) {
+        if (await el.isVisible()) return el;
+      }
+    } catch { /* selector absent */ }
+  }
+  return null;
+}
+
+/** Returns all visible pagination dots, or empty array if none found. */
+export async function findCarouselDots(page: Page): Promise<ElementHandle[]> {
+  for (const sel of DOT_SELECTORS) {
+    try {
+      const dots = await page.$$(sel);
+      const visible = [];
+      for (const d of dots) {
+        if (await d.isVisible()) visible.push(d);
+      }
+      if (visible.length >= 2) return visible;
+    } catch { /* selector absent */ }
+  }
+  return [];
+}
+
+/** Click the carousel next button once, wait for transition + image load.
+ *  Returns false if the arrow is gone / not clickable. */
+export async function advanceCarouselOnce(page: Page, arrow: ElementHandle): Promise<boolean> {
+  try {
+    await arrow.click();
+    // Allow time for the slide transition animation and for the proxy to
+    // fetch the new slide's image before the caller samples the DOM.
+    await page.waitForTimeout(1800);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Scroll the page to trigger lazy-loading. */

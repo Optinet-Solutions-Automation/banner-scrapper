@@ -3,7 +3,7 @@ import { TierConfig, humanDelay } from './tiers/tier-config';
 import { BannerImage, TierResult } from './types';
 import { validatePageSuccess } from './tiers/validator';
 import { dismissPopups } from './popup-handler';
-import { advanceCarousels, scrollToLoadImages } from './carousel-handler';
+import { advanceCarousels, scrollToLoadImages, findCarouselNext, findCarouselDots, advanceCarouselOnce } from './carousel-handler';
 import { detectBanners } from './banner-detector';
 import { findPromotionsUrl } from './page-navigator';
 import { downloadBanners } from './image-downloader';
@@ -113,32 +113,68 @@ export async function scrapeWithTier(
 
     if (config.humanDelays) await humanDelay(500, 1500);
 
-    // ── Homepage banners ────────────────────────────────────────────────────
+    // ── Homepage banners (progressive carousel capture) ──────────────────────
+    // Scroll to trigger lazy-loading of below-fold images first.
     await scrollToLoadImages(page).catch(async () => {
-      // Navigation mid-scroll (context destroyed) — wait for it to settle
       await page.waitForLoadState('load').catch(() => {});
       await page.waitForTimeout(2000);
     });
-    await advanceCarousels(page);
 
-    // Some sites (e.g. betway.com, spinsup.com) use JS-hydrated carousels whose
-    // images only appear after React/Vue/Rails initialises. Through a proxy the
-    // JS takes longer — wait up to 30 s for a large image before giving up.
+    // Wait for initial large image to appear (JS-hydrated hero carousels on SPAs
+    // take extra time through a proxy before the first slide image loads).
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('img')).some(img => {
         const r = img.getBoundingClientRect();
         return r.width >= 500 && r.height >= 150;
       }),
       { timeout: 30_000 }
-    ).catch(() => {}); // proceed even if none appear
+    ).catch(() => {});
 
-    const homepageRaw = await detectBanners(page, 'homepage');
+    // Progressive capture: sample banners BEFORE each carousel advance so every
+    // slide is captured while it is active and its image is fully loaded through
+    // the proxy. This is more reliable than advancing all-at-once then sampling
+    // once, which misses slides whose images hadn't loaded yet.
+    const homepageRaw: Awaited<ReturnType<typeof detectBanners>> = [];
+    const seenHomeKeys = new Set<string>();
+
+    const addHomeBanners = async () => {
+      const batch = await detectBanners(page, 'homepage');
+      for (const b of batch) {
+        const k = imageKey(b.src);
+        if (!seenHomeKeys.has(k)) { seenHomeKeys.add(k); homepageRaw.push(b); }
+      }
+    };
+
+    // Sample initial state (active slide)
+    await addHomeBanners();
+
+    // Try arrow-based advancement
+    const nextArrow = await findCarouselNext(page);
+    if (nextArrow) {
+      for (let i = 0; i < 8; i++) {
+        const ok = await advanceCarouselOnce(page, nextArrow);
+        if (!ok) break;
+        await addHomeBanners();
+      }
+    } else {
+      // Dot-based fallback (Swiper pagination bullets)
+      const dots = await findCarouselDots(page);
+      for (const dot of dots) {
+        try { await dot.click(); } catch { continue; }
+        await page.waitForTimeout(1800);
+        await addHomeBanners();
+      }
+      if (!dots.length) {
+        // Last resort: plain advanceCarousels so the carousel at least auto-rotates
+        await advanceCarousels(page);
+        await addHomeBanners();
+      }
+    }
+
     await takeScreenshot(page, `tier${config.tier}_banners_found`);
-    console.log(`  Found ${homepageRaw.length} homepage banner candidate(s)`);
+    console.log(`  Found ${homepageRaw.length} homepage banner candidate(s) across all slides`);
 
-    // Deduplicate within homepage: same image served at multiple sizes
-    // (e.g. hero carousel at 1293×420 + promo card grid at 664×312).
-    // Group by normalized image identity; keep the largest version of each.
+    // Deduplicate within homepage: same image at multiple sizes
     const homepageDeduped = deduplicateByIdentity(homepageRaw);
     if (homepageDeduped.length < homepageRaw.length) {
       console.log(`  ↩ Homepage: removed ${homepageRaw.length - homepageDeduped.length} size-duplicate(s)`);
