@@ -81,14 +81,15 @@ export async function scrapeWithTier(
     });
     await advanceCarousels(page);
 
-    // Some sites (e.g. betway.com) use JS-hydrated carousels whose images only
-    // appear after React/Vue initialises — wait up to 10 s for a large image.
+    // Some sites (e.g. betway.com, spinsup.com) use JS-hydrated carousels whose
+    // images only appear after React/Vue/Rails initialises. Through a proxy the
+    // JS takes longer — wait up to 30 s for a large image before giving up.
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('img')).some(img => {
         const r = img.getBoundingClientRect();
         return r.width >= 500 && r.height >= 150;
       }),
-      { timeout: 10_000 }
+      { timeout: 30_000 }
     ).catch(() => {}); // proceed even if none appear
 
     const homepageRaw = await detectBanners(page, 'homepage');
