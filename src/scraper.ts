@@ -35,6 +35,70 @@ function imageKey(src: string): string {
   } catch { return src; }
 }
 
+/** Scroll the page viewport-by-viewport, waiting at each step for lazy-loaded
+ *  images to appear through the proxy, then collecting all detected banners.
+ *
+ *  This is the reliable way to handle promo pages (and any scroll-based layout)
+ *  on Cloud Run: the proxy fetches images on demand per viewport position, so
+ *  we must dwell at each position long enough for the fetch to complete before
+ *  moving on.  A single-pass scroll + single detectBanners misses everything
+ *  that wasn't loaded at the top of the page. */
+async function progressiveScrollCapture(
+  page: Page,
+  pageType: 'homepage' | 'promotions',
+  seenKeys: Set<string>
+): Promise<Awaited<ReturnType<typeof detectBanners>>> {
+  const collected: Awaited<ReturnType<typeof detectBanners>> = [];
+
+  const addNew = async () => {
+    const batch = await detectBanners(page, pageType);
+    for (const b of batch) {
+      const k = imageKey(b.src);
+      if (!seenKeys.has(k)) { seenKeys.add(k); collected.push(b); }
+    }
+  };
+
+  // Page / viewport dimensions
+  const { pageH, viewH } = await page.evaluate(() => ({
+    pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+    viewH: window.innerHeight,
+  }));
+
+  const STEP     = Math.round(viewH * 0.75); // 75% step → overlapping windows
+  const MAX_STEPS = 25;                       // safety cap (~40 000px max)
+
+  for (let step = 0; step <= MAX_STEPS; step++) {
+    const scrollY = step * STEP;
+    await page.evaluate(y => window.scrollTo(0, y), scrollY);
+
+    // Wait for at least one large image in the current viewport to have loaded.
+    // Through a proxy, images are fetched on demand — we must dwell here until
+    // the fetch completes before sampling the DOM.
+    await page.waitForFunction(
+      () => {
+        const vh = window.innerHeight;
+        const inView = Array.from(document.querySelectorAll('img')).filter(img => {
+          const r = img.getBoundingClientRect();
+          return r.top < vh && r.bottom > 0 && r.width >= 100 && r.height >= 100;
+        });
+        // If no large images are in this viewport section, don't wait
+        return inView.length === 0 || inView.some(img => (img as HTMLImageElement).naturalWidth > 0);
+      },
+      { timeout: 12_000 }
+    ).catch(() => {}); // always proceed even if timeout
+
+    await addNew();
+
+    if (scrollY + viewH >= pageH) break; // reached the bottom
+  }
+
+  // Return to top so screenshots look sensible
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(400);
+
+  return collected;
+}
+
 /** Given a list of banner candidates that may include the same image at
  *  multiple sizes, return only the largest version of each unique image. */
 function deduplicateByIdentity<T extends { src: string; width: number; height: number }>(items: T[]): T[] {
@@ -200,24 +264,21 @@ export async function scrapeWithTier(
       const promoValidation = await validatePageSuccess(page, config.tier);
       if (promoValidation.success) {
         await dismissPopups(page);
-        await scrollToLoadImages(page).catch(async () => {
-          await page.waitForLoadState('load').catch(() => {});
-          await page.waitForTimeout(2000);
-        });
 
-        // Wait for promo page images to hydrate — JS-heavy promo pages (SPAs,
-        // Rails/React sites) render their cards after JS initialises, same as
-        // the homepage carousel. Use 300 px width floor to match promo cards in
-        // multi-column grids. Falls through immediately if nothing appears in 30 s.
+        // Wait for the above-fold content to hydrate before scrolling
         await page.waitForFunction(
           () => Array.from(document.querySelectorAll('img')).some(img => {
             const r = img.getBoundingClientRect();
-            return r.width >= 300 && r.height >= 150;
+            return r.width >= 200 && r.height >= 100;
           }),
           { timeout: 30_000 }
         ).catch(() => {});
 
-        const promoRaw = await detectBanners(page, 'promotions');
+        // Progressive scroll capture: pauses at each viewport position and waits
+        // for proxy-fetched lazy images to load before sampling and moving on.
+        // This is the only reliable way to capture all promo cards when images
+        // are lazy-loaded and the proxy adds latency to each image fetch.
+        const promoRaw = await progressiveScrollCapture(page, 'promotions', new Set<string>());
         await takeScreenshot(page, `tier${config.tier}_promos_scraped`);
         console.log(`  Found ${promoRaw.length} promo banner candidate(s)`);
 
