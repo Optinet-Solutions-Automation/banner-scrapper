@@ -71,28 +71,18 @@ async function progressiveScrollCapture(
     const scrollY = step * STEP;
     await page.evaluate(y => window.scrollTo(0, y), scrollY);
 
-    // Wait for at least one large image in the current viewport to have loaded.
-    // Through a proxy, images are fetched on demand — we must dwell here until
-    // the fetch completes before sampling the DOM.
-    await page.waitForFunction(
-      () => {
-        const vh = window.innerHeight;
-        const inView = Array.from(document.querySelectorAll('img')).filter(img => {
-          const r = img.getBoundingClientRect();
-          return r.top < vh && r.bottom > 0 && r.width >= 100 && r.height >= 100;
-        });
-        // If no large images are in this viewport section, don't wait
-        return inView.length === 0 || inView.some(img => (img as HTMLImageElement).naturalWidth > 0);
-      },
-      { timeout: 12_000 }
-    ).catch(() => {}); // always proceed even if timeout
+    // Fixed dwell: lazy-loaded images start at 0×0 until the proxy fetches them,
+    // so a "smart" waitForFunction that checks dimensions exits immediately
+    // (inView.length === 0 → true) before any image has loaded.
+    // A guaranteed 2.5 s pause at each viewport position is simpler and reliable.
+    await page.waitForTimeout(2500);
 
     await addNew();
 
     if (scrollY + viewH >= pageH) break; // reached the bottom
   }
 
-  // Return to top so screenshots look sensible
+  // Return to top
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(400);
 
@@ -235,8 +225,14 @@ export async function scrapeWithTier(
       }
     }
 
+    // Also scroll below the hero to pick up any promo-banner sections further
+    // down the homepage (e.g. "Featured Promotions" grids below the carousel).
+    // Reuse seenHomeKeys so already-found slides don't get counted twice.
+    const belowFold = await progressiveScrollCapture(page, 'homepage', seenHomeKeys);
+    homepageRaw.push(...belowFold);
+
     await takeScreenshot(page, `tier${config.tier}_banners_found`);
-    console.log(`  Found ${homepageRaw.length} homepage banner candidate(s) across all slides`);
+    console.log(`  Found ${homepageRaw.length} homepage banner candidate(s) (carousel + below-fold)`);
 
     // Deduplicate within homepage: same image at multiple sizes
     const homepageDeduped = deduplicateByIdentity(homepageRaw);
