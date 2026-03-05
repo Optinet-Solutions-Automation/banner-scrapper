@@ -6,6 +6,7 @@ export enum FailureReason {
   TIMEOUT = 'timeout',
   EMPTY_PAGE = 'empty_page',
   BOT_DETECTED = 'bot_detected',
+  HARD_BLOCKED = 'hard_blocked',       // completely blank response — no title/body/images
   CONNECTION_REFUSED = 'connection_refused',
   CONTENT_MISSING = 'content_missing',
 }

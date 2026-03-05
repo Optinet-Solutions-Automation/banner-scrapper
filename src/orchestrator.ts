@@ -8,8 +8,11 @@ import { deliverOutput } from './output';
 import { config, proxyServer } from './config';
 import { emitProgress } from './progress-emitter';
 
-// Geo order to try when a site has no stored geo (cheapest/most permissive first)
-const GEO_AUTO_ORDER = ['ca', 'gb', 'au', 'se', 'in', 'us'];
+// Geo order to try when a site has no stored geo.
+// Broader list = more casino markets covered without manual intervention.
+// PH is near the front because the operator base is Philippines-heavy;
+// GB/SE are common European licensing jurisdictions; SG/IN cover Asia-Pacific.
+const GEO_AUTO_ORDER = ['ca', 'ph', 'gb', 'au', 'se', 'in', 'us', 'de', 'sg', 'nz'];
 
 // Failure reasons where changing geo might help
 const GEO_SENSITIVE = new Set<FailureReason | undefined>([
@@ -17,13 +20,19 @@ const GEO_SENSITIVE = new Set<FailureReason | undefined>([
   FailureReason.ACCESS_DENIED,
   FailureReason.EMPTY_PAGE,
   FailureReason.CONTENT_MISSING,
+  // "You have been blocked" / "bot detected" messages can be geo-specific
+  // (the site blocks a specific country's IP range but not another's).
+  // Trying the next geo is cheap and often fixes this.
+  FailureReason.BOT_DETECTED,
 ]);
 
-// Failure reasons where geo change won't help — escalate tier immediately
+// Failure reasons where geo change won't help — escalate tier immediately.
+// HARD_BLOCKED = completely blank page (IP-level block, all geos from this proxy fail).
+// CF/CAPTCHA = site-wide protection, not geo-specific.
 const TIER_ESCALATE = new Set<FailureReason | undefined>([
   FailureReason.CLOUDFLARE_CHALLENGE,
-  FailureReason.BOT_DETECTED,
   FailureReason.CAPTCHA_DETECTED,
+  FailureReason.HARD_BLOCKED,
 ]);
 
 export async function scrapeSite(url: string, geoOverride?: string): Promise<ScrapeResult> {

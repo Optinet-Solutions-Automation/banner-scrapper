@@ -96,11 +96,11 @@ export async function validatePageSuccess(page: Page, tier: number): Promise<Tie
   // ── Hard proxy block (completely blank response) ─────────────────────────
   // A datacenter IP that is hard-blocked by the site receives an empty 200 OK:
   // no title, no body text, no images. This is NOT an SPA still loading — those
-  // always have at least an HTML skeleton. Classify as BOT_DETECTED so the
-  // orchestrator escalates the tier immediately instead of wasting time trying
-  // 6 different geos with the same blank result.
+  // always have at least an HTML skeleton. Use HARD_BLOCKED so the orchestrator
+  // escalates the tier immediately instead of wasting time cycling through geos
+  // (all exit IPs from this proxy tier are equally blocked).
   if (!title && bodyText.trim().length === 0 && imageCount === 0) {
-    return { success: false, failureReason: FailureReason.BOT_DETECTED, tier };
+    return { success: false, failureReason: FailureReason.HARD_BLOCKED, tier };
   }
 
   // ── Empty / unrendered page ───────────────────────────────────────────────
