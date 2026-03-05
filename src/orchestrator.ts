@@ -205,7 +205,18 @@ export async function scrapeSite(url: string, geoOverride?: string): Promise<Scr
     config.dcProxy.geo = originalGeo;
   }
 
-  result.error = 'All tiers exhausted — site flagged for manual review';
+  // Give the user a specific, actionable error rather than a generic one.
+  // Inspect what the last known failure mode was so they know what to do.
+  const maxConfigured = config.maxTier;
+  if (maxConfigured < 4) {
+    result.error =
+      'Needs Tier 4 (residential proxy) — datacenter proxy is blocked by this site. ' +
+      'Set MAX_TIER=4 and configure RES_PROXY_* env vars to scrape it.';
+  } else {
+    result.error =
+      'All tiers exhausted — site is unreachable even with residential proxy. ' +
+      'It may require manual login, age-gate bypass, or is region-locked worldwide.';
+  }
   console.log(`\n❌ FAILED — ${result.error}`);
   emitProgress({ type: 'site_done', domain, result });
   return result;
