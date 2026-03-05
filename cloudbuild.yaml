@@ -27,7 +27,7 @@ steps:
       - run
       - deploy
       - banner-scraper
-      - '--image=gcr.io/$PROJECT_ID/banner-scraper:$COMMIT_SHA'
+      - '--image=gcr.io/$PROJECT_ID/banner-scraper:latest'
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
