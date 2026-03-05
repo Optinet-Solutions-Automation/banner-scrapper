@@ -20,8 +20,13 @@ export async function launchBrowser(tierCfg: TierConfig, attempt = 0): Promise<B
   if (server) console.log(`  Proxy: ${server}`);
 
   const proxyCredentials = (() => {
-    if (proxyType === 'datacenter')  return config.dcProxy;
-    if (proxyType === 'residential') return config.resProxy;
+    if (proxyType === 'datacenter') return config.dcProxy;
+    if (proxyType === 'residential') {
+      const rp = config.resProxy;
+      // Oxylabs residential: geo targeting via username suffix "-country-XX"
+      const username = rp.geo ? `${rp.username}-country-${rp.geo.toLowerCase()}` : rp.username;
+      return { username, password: rp.password };
+    }
     return null;
   })();
 

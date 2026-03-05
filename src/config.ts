@@ -25,7 +25,10 @@ export const config = {
     port:     process.env.RES_PROXY_PORT     ?? '',
     username: process.env.RES_PROXY_USERNAME ?? '',
     password: process.env.RES_PROXY_PASSWORD ?? '',
-    geoCountries: (process.env.RES_PROXY_GEO_COUNTRIES ?? 'US,UK,CA,AU,NZ').split(','),
+    // Country code for geo targeting — appended to username as "-country-XX"
+    // (Oxylabs residential format: username-country-ph)
+    geo:      process.env.RES_PROXY_GEO      ?? '',
+    geoCountries: (process.env.RES_PROXY_GEO_COUNTRIES ?? 'PH,CA,GB,AU').split(','),
   },
 
   // Output
