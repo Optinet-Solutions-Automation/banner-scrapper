@@ -74,8 +74,9 @@ async function progressiveScrollCapture(
     // Fixed dwell: lazy-loaded images start at 0×0 until the proxy fetches them,
     // so a "smart" waitForFunction that checks dimensions exits immediately
     // (inView.length === 0 → true) before any image has loaded.
-    // A guaranteed 2.5 s pause at each viewport position is simpler and reliable.
-    await page.waitForTimeout(2500);
+    // A guaranteed 3.5 s pause at each viewport position is simpler and reliable.
+    // 3.5s covers borderline proxy latency including Cloud Run cold-start overhead.
+    await page.waitForTimeout(3500);
 
     await addNew();
 

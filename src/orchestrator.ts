@@ -97,10 +97,19 @@ export async function scrapeSite(url: string, geoOverride?: string): Promise<Scr
               const pageResult = await scrapeWithTier(url, domain, context, tierCfg);
 
               if (pageResult.tierResult.success) {
-                // Page loaded OK but no banners found — likely geo-targeted content
-                // difference. Try the next geo before giving up on this tier.
+                // Page loaded OK but no banners found.
+                // Could be a cold-start / proxy-latency issue (images didn't load in
+                // the dwell window) OR genuine geo-targeted content.
+                // Retry the same geo once before giving up — this catches cold-start
+                // cases where the second attempt on a warm container succeeds.
+                // Only move to the next geo after ALL retries return 0 banners.
                 if (pageResult.homepageBanners.length === 0 && geosToTry.length > 1) {
-                  console.log(`  ⚠ 0 banners at ${geo.toUpperCase()} — trying next geo`);
+                  if (attempt < tierCfg.retries) {
+                    console.log(`  ⚠ 0 banners at ${geo.toUpperCase()} — retrying same geo (attempt ${attempt}/${tierCfg.retries})`);
+                    emitProgress({ type: 'progress', domain, message: `0 banners at ${geo.toUpperCase()} — retrying` });
+                    continue; // retry same geo with same attempt counter
+                  }
+                  console.log(`  ⚠ 0 banners at ${geo.toUpperCase()} after ${attempt} attempts — trying next geo`);
                   emitProgress({ type: 'progress', domain, message: `0 banners at ${geo.toUpperCase()} — trying next geo` });
                   break; // break attempt loop → continue geoLoop
                 }
