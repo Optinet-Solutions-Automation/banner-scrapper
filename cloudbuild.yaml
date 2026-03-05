@@ -8,8 +8,6 @@ steps:
     args:
       - build
       - '-t'
-      - 'gcr.io/$PROJECT_ID/banner-scraper:$COMMIT_SHA'
-      - '-t'
       - 'gcr.io/$PROJECT_ID/banner-scraper:latest'
       - '.'
 
