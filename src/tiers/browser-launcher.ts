@@ -22,10 +22,9 @@ export async function launchBrowser(tierCfg: TierConfig, attempt = 0): Promise<B
   const proxyCredentials = (() => {
     if (proxyType === 'datacenter') return config.dcProxy;
     if (proxyType === 'residential') {
-      const rp = config.resProxy;
-      // Oxylabs residential: geo targeting via username suffix "-country-XX"
-      const username = rp.geo ? `${rp.username}-country-${rp.geo.toLowerCase()}` : rp.username;
-      return { username, password: rp.password };
+      // Geo targeting varies by provider — embed it directly in the username/password
+      // when configuring RES_PROXY_USERNAME (e.g. pl-user_area-PH for ProxyLite).
+      return config.resProxy;
     }
     return null;
   })();
