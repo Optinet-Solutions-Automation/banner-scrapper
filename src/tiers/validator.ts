@@ -33,10 +33,16 @@ export async function validatePageSuccess(page: Page, tier: number): Promise<Tie
   }
 
   // ── CAPTCHA ───────────────────────────────────────────────────────────────
-  if (
+  // Many pages embed passive widgets (Cloudflare Turnstile, invisible reCAPTCHA)
+  // that run silently in the background without blocking the user.
+  // Only treat as CAPTCHA-blocked when the challenge is ACTIVE — i.e. the
+  // captcha element is visible AND the page has very little real content.
+  // If the page loaded with 5+ images or 500+ chars of body text it is NOT blocked
+  // even if a captcha widget is present in the DOM.
+  const captchaPresent =
     bodyLower.includes('captcha') ||
-    (await page.$('iframe[src*="captcha"], .g-recaptcha, .h-captcha, [data-sitekey]')) !== null
-  ) {
+    (await page.$('iframe[src*="captcha"], .g-recaptcha, .h-captcha, [data-sitekey]')) !== null;
+  if (captchaPresent && imageCount < 5 && bodyText.trim().length < 500) {
     return { success: false, failureReason: FailureReason.CAPTCHA_DETECTED, tier };
   }
 

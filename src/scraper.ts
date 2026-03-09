@@ -257,7 +257,27 @@ export async function scrapeWithTier(
       console.log(`  → Promo page: ${promoUrl}`);
       emitProgress({ type: 'progress', domain, message: `Navigating to promo page…` });
 
-      await page.goto(promoUrl, { waitUntil: config.waitUntil, timeout: config.timeout });
+      // Pause like a human before clicking away to another section.
+      // Sites with Cloudflare Turnstile or bot-score checks flag immediate
+      // programmatic navigation (< 1 s after page load) as suspicious.
+      await humanDelay(1500, 3500);
+
+      // Prefer click-based navigation over raw page.goto() — it preserves
+      // session state and looks more human-like to anti-bot systems.
+      const promoPath = new URL(promoUrl).pathname + new URL(promoUrl).search;
+      const navLink = await page.$(`a[href="${promoPath}"], a[href="${promoUrl}"]`).catch(() => null);
+      let navigatedViaClick = false;
+      if (navLink && await navLink.isVisible().catch(() => false)) {
+        await navLink.scrollIntoViewIfNeeded().catch(() => {});
+        await humanDelay(300, 700);
+        await navLink.click().catch(() => {});
+        await page.waitForLoadState(config.waitUntil as 'load' | 'domcontentloaded' | 'networkidle').catch(() => {});
+        navigatedViaClick = true;
+        console.log(`  → Navigated via nav click`);
+      }
+      if (!navigatedViaClick) {
+        await page.goto(promoUrl, { waitUntil: config.waitUntil, timeout: config.timeout });
+      }
       if (config.proxy !== 'none') {
         await page.waitForFunction(
           () => document.images.length >= 2 || (document.body?.innerText ?? '').trim().length >= 300,
