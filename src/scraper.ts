@@ -8,6 +8,7 @@ import { detectBanners } from './banner-detector';
 import { findPromotionsUrl } from './page-navigator';
 import { downloadBanners } from './image-downloader';
 import { takeScreenshot } from './screenshot';
+import { emitProgress } from './progress-emitter';
 
 // ── Deduplication helpers ────────────────────────────────────────────────────
 
@@ -111,10 +112,10 @@ export interface PageScrapeResult {
 }
 
 export async function scrapeWithTier(
-  url:     string,
-  domain:  string,
-  context: BrowserContext,
-  config:  TierConfig
+  url:      string,
+  domain:   string,
+  context:  BrowserContext,
+  config:   TierConfig
 ): Promise<PageScrapeResult> {
   const page = await context.newPage();
 
@@ -200,6 +201,12 @@ export async function scrapeWithTier(
       }
     };
 
+    // Residential proxy (Tier 4) needs longer dwell between slide advances:
+    // images are fetched through a residential exit node which has higher latency
+    // than a datacenter proxy. At 1800ms the next slide's image often hasn't loaded
+    // yet, so it looks identical to the previous slide and gets deduped out.
+    const carouselDwellMs = config.tier >= 4 ? 3500 : 1800;
+
     // Sample initial state (active slide)
     await addHomeBanners();
 
@@ -207,7 +214,7 @@ export async function scrapeWithTier(
     const nextArrow = await findCarouselNext(page);
     if (nextArrow) {
       for (let i = 0; i < 8; i++) {
-        const ok = await advanceCarouselOnce(page, nextArrow);
+        const ok = await advanceCarouselOnce(page, nextArrow, carouselDwellMs);
         if (!ok) break;
         await addHomeBanners();
       }
@@ -216,7 +223,7 @@ export async function scrapeWithTier(
       const dots = await findCarouselDots(page);
       for (const dot of dots) {
         try { await dot.click(); } catch { continue; }
-        await page.waitForTimeout(1800);
+        await page.waitForTimeout(carouselDwellMs);
         await addHomeBanners();
       }
       if (!dots.length) {
@@ -248,6 +255,8 @@ export async function scrapeWithTier(
     const promoUrl = await findPromotionsUrl(page, url);
     if (promoUrl) {
       console.log(`  → Promo page: ${promoUrl}`);
+      emitProgress({ type: 'progress', domain, message: `Navigating to promo page…` });
+
       await page.goto(promoUrl, { waitUntil: config.waitUntil, timeout: config.timeout });
       if (config.proxy !== 'none') {
         await page.waitForFunction(
@@ -261,6 +270,8 @@ export async function scrapeWithTier(
       const promoValidation = await validatePageSuccess(page, config.tier);
       if (promoValidation.success) {
         await dismissPopups(page);
+
+        emitProgress({ type: 'progress', domain, message: `Promo page loaded — scanning for banners…` });
 
         // Wait for the above-fold content to hydrate before scrolling
         await page.waitForFunction(
@@ -286,12 +297,15 @@ export async function scrapeWithTier(
         const dupCount = promoRaw.length - promoDeduped.length;
         if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} duplicate(s) (within promo or already on homepage)`);
 
+        emitProgress({ type: 'progress', domain, message: `Promo page: ${promoDeduped.length} banner(s) found` });
         promoBanners = await downloadBanners(context, promoDeduped, domain, 'promotions');
       } else {
         console.log(`  ⚠ Promo page blocked: ${promoValidation.failureReason}`);
+        emitProgress({ type: 'progress', domain, message: `Promo page blocked (${promoValidation.failureReason})` });
       }
     } else {
       console.log(`  ℹ No promotions page found`);
+      emitProgress({ type: 'progress', domain, message: `No promotions page found` });
     }
 
     await page.close();

@@ -7,11 +7,30 @@ const PROMO_NAV_PATTERNS = [
 const PROMO_PATH_GUESSES = [
   '/promotions', '/promos', '/bonuses', '/offers', '/bonus',
   '/deals', '/rewards', '/campaigns', '/specials',
+  // Language-prefixed paths common on multilingual casino sites (e.g. mystake888.com /en/...)
+  '/en/promotions', '/en/promos', '/en/bonuses', '/en/offers',
+  '/en/casino/promotions', '/en/static/promos',
+  '/casino/promotions', '/casino/bonuses',
 ];
+
+/** Normalise an origin for comparison — strips www. so that
+ *  "https://mystake888.com" and "https://www.mystake888.com" match. */
+function normaliseOrigin(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.hostname.replace(/^www\./, '')}`;
+  } catch { return url; }
+}
 
 /** Try to find and return the URL of the promotions/bonuses page. */
 export async function findPromotionsUrl(page: Page, baseUrl: string): Promise<string | null> {
-  // 1. Scan nav links for promo-like text
+  // Use the CURRENT page URL (after any redirects) — not the original baseUrl.
+  // If the page redirected from example.com → www.example.com, nav links will have
+  // the www. origin. Comparing against the original URL would filter them all out.
+  const currentUrl = page.url() || baseUrl;
+  const baseOriginNorm = normaliseOrigin(currentUrl);
+
+  // 1. Scan all links on the page for promo-like text or href
   const links = await page.evaluate(() =>
     Array.from(document.querySelectorAll('a[href]')).map(a => ({
       href: (a as HTMLAnchorElement).href,
@@ -21,10 +40,8 @@ export async function findPromotionsUrl(page: Page, baseUrl: string): Promise<st
 
   for (const link of links) {
     if (!link.href.startsWith('http')) continue;
-    // Same origin only
-    const linkOrigin = new URL(link.href).origin;
-    const baseOrigin = new URL(baseUrl).origin;
-    if (linkOrigin !== baseOrigin) continue;
+    // Same-site only (normalised — ignores www. difference)
+    if (normaliseOrigin(link.href) !== baseOriginNorm) continue;
 
     const combined = `${link.href} ${link.text}`.toLowerCase();
     for (const pat of PROMO_NAV_PATTERNS) {
@@ -34,8 +51,8 @@ export async function findPromotionsUrl(page: Page, baseUrl: string): Promise<st
     }
   }
 
-  // 2. Try common path guesses
-  const origin = new URL(baseUrl).origin;
+  // 2. Try common path guesses via HEAD request
+  const origin = new URL(currentUrl).origin;
   for (const path of PROMO_PATH_GUESSES) {
     const candidate = `${origin}${path}`;
     try {

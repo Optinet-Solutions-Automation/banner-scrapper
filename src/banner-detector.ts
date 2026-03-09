@@ -67,12 +67,16 @@ export async function detectBanners(
   page: Page,
   pageType: 'homepage' | 'promotions'
 ): Promise<BannerImage[]> {
-  // Promotions pages use a lower width floor so individual promo-card images
-  // (which sit inside a 2-column grid and render ~300-450px wide) are captured.
+  // Promotions pages use lower floors so individual promo-card images
+  // (which sit inside a 2–3 column grid and render ~300-450px wide × 90-150px tall)
+  // are captured. Cards are CSS-scaled down but their natural image dimensions are
+  // banner-sized — the natural-dim fallback below picks them up.
   const minBannerWidth = pageType === 'promotions'
-    ? Math.round(config.minBannerWidth * 0.6)
+    ? Math.round(config.minBannerWidth * 0.6)   // 500 → 300px
     : config.minBannerWidth;
-  const { minBannerHeight } = config;
+  const minBannerHeight = pageType === 'promotions'
+    ? Math.round(config.minBannerHeight * 0.6)   // 150 → 90px
+    : config.minBannerHeight;
 
   const rawImages = await page.evaluate(
     ({ minW, minH }) => {
@@ -89,12 +93,18 @@ export async function detectBanners(
         let w = Math.round(rect.width);
         let h = Math.round(rect.height);
 
-        // Inactive carousel slides are collapsed to 0–2 px in one dimension
-        // by the carousel CSS (e.g. height:1px on non-active Swiper slides).
-        // Their natural dimensions still reflect the real banner size — use
-        // them when the element is visually collapsed but the source image is
-        // clearly banner-sized. This captures ALL slides, not just the active one.
-        if ((h < 5 || w < 5) && img.naturalWidth >= minW && img.naturalHeight >= minH) {
+        // Two cases where we fall back to natural dimensions:
+        //
+        // 1. Collapsed carousel slides (h < 5 or w < 5): inactive Swiper slides are
+        //    set to height:1px by the carousel CSS. Natural dims give the real size.
+        //
+        // 2. Promo-card images rendered small in a grid: the actual artwork is
+        //    banner-sized (e.g. 640×213px) but CSS scales it down to fit the card
+        //    (e.g. 450×107px rendered). Rendered height falls under the threshold
+        //    even though the image IS a promotional banner.
+        //    Use natural dims whenever the rendered size fails the threshold but the
+        //    natural image is clearly large enough to be a real banner.
+        if ((w < minW || h < minH) && img.naturalWidth >= minW && img.naturalHeight >= minH) {
           w = img.naturalWidth;
           h = img.naturalHeight;
         }

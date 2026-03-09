@@ -127,13 +127,15 @@ export async function findCarouselDots(page: Page): Promise<ElementHandle[]> {
 }
 
 /** Click the carousel next button once, wait for transition + image load.
- *  Returns false if the arrow is gone / not clickable. */
-export async function advanceCarouselOnce(page: Page, arrow: ElementHandle): Promise<boolean> {
+ *  Returns false if the arrow is gone / not clickable.
+ *  waitMs defaults to 1800ms for datacenter tiers; pass 3500ms for residential (Tier 4)
+ *  where proxy latency is higher and images take longer to fully load. */
+export async function advanceCarouselOnce(page: Page, arrow: ElementHandle, waitMs = 1800): Promise<boolean> {
   try {
     await arrow.click();
     // Allow time for the slide transition animation and for the proxy to
     // fetch the new slide's image before the caller samples the DOM.
-    await page.waitForTimeout(1800);
+    await page.waitForTimeout(waitMs);
     return true;
   } catch {
     return false;

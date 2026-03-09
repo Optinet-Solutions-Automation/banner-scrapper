@@ -190,19 +190,27 @@ export async function scrapeSite(url: string, geoOverride?: string): Promise<Scr
             }
 
             result.tier            = tier;
-            result.geo             = config.dcProxy.geo || undefined;
+            // For residential proxy (Tier 4), report the residential geo — NOT the
+            // datacenter geo (which is left over from Tier 3's geo loop and is wrong).
+            result.geo = tierCfg.proxy === 'residential'
+              ? (config.resProxy.geo || undefined)
+              : (config.dcProxy.geo || undefined);
             result.homepageBanners = pageResult.homepageBanners;
             result.promoBanners    = pageResult.promoBanners;
             result.success         = true;
 
-            // Preserve any stored geo when saving (non-proxy tiers don't change geo)
+            // Save the working geo for Tier 4 so next run uses the correct residential geo.
+            // For non-proxy tiers (1, 2) preserve any existing stored geo unchanged.
+            const workingGeoToSave = tierCfg.proxy === 'residential'
+              ? (config.resProxy.geo || savedEntry?.workingGeo)
+              : savedEntry?.workingGeo;
             saveSiteMemory(domain, {
               lastSuccessfulTier: tier,
               lastScraped:        new Date().toISOString(),
-              workingGeo:         savedEntry?.workingGeo,
+              workingGeo:         workingGeoToSave,
             });
 
-            console.log(`\n✅ SUCCESS — Tier ${tier} | ${result.homepageBanners.length} homepage + ${result.promoBanners.length} promo banners`);
+            console.log(`\n✅ SUCCESS — Tier ${tier}${result.geo ? ` (${result.geo.toUpperCase()})` : ''} | ${result.homepageBanners.length} homepage + ${result.promoBanners.length} promo banners`);
             await deliverOutput(result);
             emitProgress({ type: 'site_done', domain, result });
             return result;
