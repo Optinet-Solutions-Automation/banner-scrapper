@@ -59,12 +59,14 @@ export async function scrapeSite(url: string, geoOverride?: string): Promise<Scr
   };
 
   // Save original global geo so we can restore after this site finishes
-  const originalGeo = config.dcProxy.geo;
+  const originalDcGeo  = config.dcProxy.geo;
+  const originalResGeo = config.resProxy.geo;
 
   // Priority: explicit override > site memory > leave global config unchanged
   const preferredGeo = geoOverride || savedEntry?.workingGeo || null;
   if (preferredGeo) {
-    config.dcProxy.geo = preferredGeo;
+    config.dcProxy.geo  = preferredGeo;
+    config.resProxy.geo = preferredGeo;   // Tier 4 residential uses same geo
     console.log(`  Geo: ${preferredGeo.toUpperCase()} (${geoOverride ? 'override' : 'from memory'})`);
   }
 
@@ -219,8 +221,9 @@ export async function scrapeSite(url: string, geoOverride?: string): Promise<Scr
       console.log(`  → Escalating to Tier ${tier + 1}…`);
     }
   } finally {
-    // Always restore the global geo setting so next site starts fresh
-    config.dcProxy.geo = originalGeo;
+    // Always restore the global geo settings so next site starts fresh
+    config.dcProxy.geo  = originalDcGeo;
+    config.resProxy.geo = originalResGeo;
   }
 
   // Give the user a specific, actionable error rather than a generic one.

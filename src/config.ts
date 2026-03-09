@@ -21,13 +21,17 @@ export const config = {
 
   // Residential proxy (Tier 4)
   resProxy: {
-    host:     process.env.RES_PROXY_HOST     ?? '',
-    port:     process.env.RES_PROXY_PORT     ?? '',
-    username: process.env.RES_PROXY_USERNAME ?? '',
-    password: process.env.RES_PROXY_PASSWORD ?? '',
-    // Country code for geo targeting — appended to username as "-country-XX"
-    // (Oxylabs residential format: username-country-ph)
-    geo:      process.env.RES_PROXY_GEO      ?? '',
+    host:      process.env.RES_PROXY_HOST       ?? '',
+    port:      process.env.RES_PROXY_PORT       ?? '',
+    // Base username WITHOUT geo suffix (e.g. "pl-nskojcm40ezt" for ProxyLite).
+    // Geo is appended dynamically: base + geoFormat + "-" + GEO (e.g. "pl-xxx_area-PH").
+    username:  process.env.RES_PROXY_USERNAME   ?? '',
+    password:  process.env.RES_PROXY_PASSWORD   ?? '',
+    geo:       process.env.RES_PROXY_GEO        ?? '',
+    // Connector between base username and geo code (provider-specific).
+    // ProxyLite: "_area"  →  pl-xxx_area-PH
+    // Enigma:    "_country" (embedded in password instead, leave geoFormat empty)
+    geoFormat: process.env.RES_PROXY_GEO_FORMAT ?? '_area',
     geoCountries: (process.env.RES_PROXY_GEO_COUNTRIES ?? 'PH,CA,GB,AU').split(','),
   },
 

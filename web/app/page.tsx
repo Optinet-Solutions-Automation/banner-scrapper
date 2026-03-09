@@ -9,6 +9,7 @@ const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
 const GEO_OPTIONS = [
   { value: '',   label: 'Auto-detect',        flag: '🌍' },
+  { value: 'ph', label: 'Philippines',         flag: '🇵🇭' },
   { value: 'ca', label: 'Canada',              flag: '🇨🇦' },
   { value: 'gb', label: 'United Kingdom',      flag: '🇬🇧' },
   { value: 'au', label: 'Australia',           flag: '🇦🇺' },
@@ -17,11 +18,12 @@ const GEO_OPTIONS = [
   { value: 'us', label: 'United States',       flag: '🇺🇸' },
   { value: 'de', label: 'Germany',             flag: '🇩🇪' },
   { value: 'nz', label: 'New Zealand',         flag: '🇳🇿' },
+  { value: 'sg', label: 'Singapore',           flag: '🇸🇬' },
 ];
 
 const GEO_FLAGS: Record<string, string> = {
-  ca: '🇨🇦', gb: '🇬🇧', au: '🇦🇺', se: '🇸🇪',
-  in: '🇮🇳', us: '🇺🇸', de: '🇩🇪', nz: '🇳🇿', fr: '🇫🇷',
+  ph: '🇵🇭', ca: '🇨🇦', gb: '🇬🇧', au: '🇦🇺', se: '🇸🇪',
+  in: '🇮🇳', us: '🇺🇸', de: '🇩🇪', nz: '🇳🇿', sg: '🇸🇬', fr: '🇫🇷',
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────

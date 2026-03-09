@@ -22,9 +22,14 @@ export async function launchBrowser(tierCfg: TierConfig, attempt = 0): Promise<B
   const proxyCredentials = (() => {
     if (proxyType === 'datacenter') return config.dcProxy;
     if (proxyType === 'residential') {
-      // Geo targeting varies by provider — embed it directly in the username/password
-      // when configuring RES_PROXY_USERNAME (e.g. pl-user_area-PH for ProxyLite).
-      return config.resProxy;
+      const rp = config.resProxy;
+      // Build geo-targeted username: base + geoFormat + "-" + GEO
+      // e.g. "pl-nskojcm40ezt" + "_area" + "-PH" → "pl-nskojcm40ezt_area-PH"
+      const username = rp.geo && rp.geoFormat
+        ? `${rp.username}${rp.geoFormat}-${rp.geo.toUpperCase()}`
+        : rp.username;
+      if (rp.geo) console.log(`  Residential geo: ${rp.geo.toUpperCase()}`);
+      return { username, password: rp.password };
     }
     return null;
   })();
