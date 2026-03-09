@@ -293,12 +293,21 @@ export async function scrapeWithTier(
 
         emitProgress({ type: 'progress', domain, message: `Promo page loaded — scanning for banners…` });
 
-        // Wait for the above-fold content to hydrate before scrolling
+        // Wait for promotional content to load.
+        // "Any image >= 200×100" fires immediately on logos/headers before API-fetched
+        // promo cards appear (Next.js SPAs fetch promo data after hydration).
+        // Instead wait until at least 3 large images are present — this indicates
+        // the promo grid has actually rendered, not just the page chrome.
         await page.waitForFunction(
-          () => Array.from(document.querySelectorAll('img')).some(img => {
-            const r = img.getBoundingClientRect();
-            return r.width >= 200 && r.height >= 100;
-          }),
+          () => {
+            const imgs = Array.from(document.querySelectorAll('img'));
+            const large = imgs.filter(img => {
+              const r = img.getBoundingClientRect();
+              return (r.width >= 400 && r.height >= 80) ||
+                     (img.naturalWidth >= 400 && img.naturalHeight >= 80);
+            });
+            return large.length >= 3;
+          },
           { timeout: 30_000 }
         ).catch(() => {});
 

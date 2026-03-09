@@ -128,8 +128,17 @@ export async function detectBanners(
             img.getAttribute('data-src') ||
             img.getAttribute('data-lazy') ||
             img.getAttribute('data-original') || '';
-          if (!lazy || lazy.startsWith('data:')) continue;
-          try { src = new URL(lazy, document.baseURI).href; } catch { continue; }
+          if (!lazy || lazy.startsWith('data:')) {
+            // Last resort: parse srcset for first real URL.
+            // Handles Next.js <Image> not yet hydrated — currentSrc is data: blur placeholder
+            // but the real image URL is in srcset.
+            const srcsetAttr = img.getAttribute('srcset') ?? img.getAttribute('data-srcset') ?? '';
+            const firstSrc = srcsetAttr.split(',')[0]?.trim().split(/\s+/)[0] ?? '';
+            if (!firstSrc || firstSrc.startsWith('data:')) continue;
+            try { src = new URL(firstSrc, document.baseURI).href; } catch { continue; }
+          } else {
+            try { src = new URL(lazy, document.baseURI).href; } catch { continue; }
+          }
         }
 
         const container = img.closest(
@@ -281,7 +290,7 @@ export async function detectBanners(
     // rendered at banner sizes (e.g. leovegas 1080×1080 squares at score≈11).
     // Promotions pages use a lower threshold (10) because promo cards in a 2-column
     // grid render at ~350-400px — just below the 14 threshold without a class boost.
-    const minScore = pageType === 'promotions' ? 10 : 14;
+    const minScore = pageType === 'promotions' ? 12 : 14;
     if (score < minScore) return;
 
     banners.push({
