@@ -2,53 +2,206 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
 :root {
-  --bg: #0a0f1a;
-  --card: #111827;
-  --border: #1f2937;
+  /* Backgrounds */
+  --bg:         #07090f;
+  --surface:    #0c1120;
+  --surface-2:  #101928;
+  --surface-3:  #141f30;
+
+  /* Borders */
+  --border:     #1a2540;
+  --border-2:   #243452;
+  --border-hot: #2e4880;
+
+  /* Accent — electric blue */
+  --accent:       #4070d4;
+  --accent-light: #6090f0;
+  --accent-glow:  rgba(64, 112, 212, 0.18);
+
+  /* Amber — CTA / success */
+  --amber:      #f59e0b;
+  --amber-dim:  #d97706;
+  --amber-glow: rgba(245, 158, 11, 0.15);
+
+  /* Text */
+  --text-1: #dce6f7;
+  --text-2: #7a90b2;
+  --text-3: #3d5272;
+
+  /* Status */
+  --success: #10b981;
+  --error:   #f43f5e;
+  --warn:    #f59e0b;
 }
 
-* {
-  box-sizing: border-box;
-}
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
 
 body {
   background-color: var(--bg);
-  color: #f1f5f9;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text-1);
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #1e293b;
-}
-::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+/* Dot-grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(64, 112, 212, 0.09) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 0;
 }
 
-/* SSE log entry animations */
+/* ── Scrollbars ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hot); }
+
+/* ── Animations ────────────────────────────────────────────────────────────── */
 @keyframes fadeSlideIn {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(5px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.log-entry {
-  animation: fadeSlideIn 0.15s ease-out;
+
+@keyframes pulseAmber {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
 }
 
-/* Pulse for "in progress" indicator */
-@keyframes pulse-amber {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.4; }
+@keyframes pulseDot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+  60%       { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
 }
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Utility classes ───────────────────────────────────────────────────────── */
+.log-entry {
+  animation: fadeSlideIn 0.12s ease-out;
+}
+
 .pulse-amber {
-  animation: pulse-amber 1.4s ease-in-out infinite;
+  display: inline-block;
+  animation: pulseAmber 1.4s ease-in-out infinite;
+}
+
+.spin {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+.status-dot-online {
+  animation: pulseDot 2s ease-in-out infinite;
+}
+
+/* Skeleton shimmer */
+.shimmer {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Section label style ───────────────────────────────────────────────────── */
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.section-label::before {
+  content: '';
+  display: block;
+  width: 2px;
+  height: 12px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+.section-label .step-num {
+  color: var(--accent-light);
+  font-family: var(--font-mono);
+}
+
+/* ── Card glass effect ─────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  position: relative;
+  z-index: 1;
+  transition: border-color 0.2s;
+}
+.card:hover { border-color: var(--border-2); }
+.card.active { border-color: var(--border-hot); }
+
+/* ── Terminal ──────────────────────────────────────────────────────────────── */
+.terminal {
+  background: #04070d;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: var(--font-mono), 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.72rem;
+  line-height: 1.7;
+  position: relative;
+  overflow: hidden;
+}
+.terminal::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.04) 1px,
+    rgba(0, 0, 0, 0.04) 2px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Gradient button ───────────────────────────────────────────────────────── */
+.btn-primary {
+  background: linear-gradient(135deg, var(--amber) 0%, #e68a00 100%);
+  color: #0a0700;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 0.55rem 1.4rem;
+  transition: opacity 0.15s, transform 0.1s, box-shadow 0.2s;
+  box-shadow: 0 0 20px var(--amber-glow);
+  letter-spacing: 0.01em;
+}
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 24px rgba(245, 158, 11, 0.3);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+.btn-primary:disabled {
+  background: var(--surface-3);
+  color: var(--text-3);
+  box-shadow: none;
 }

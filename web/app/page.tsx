@@ -3,22 +3,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
-// Local dev: set NEXT_PUBLIC_BACKEND_URL=http://localhost:3001 in web/.env.local
-// Production: set NEXT_PUBLIC_BACKEND_URL=https://your-cloud-run-url.run.app in Vercel
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
 const GEO_OPTIONS = [
-  { value: '',   label: 'Auto-detect',        flag: '🌍' },
-  { value: 'ph', label: 'Philippines',         flag: '🇵🇭' },
-  { value: 'ca', label: 'Canada',              flag: '🇨🇦' },
-  { value: 'gb', label: 'United Kingdom',      flag: '🇬🇧' },
-  { value: 'au', label: 'Australia',           flag: '🇦🇺' },
-  { value: 'se', label: 'Sweden',              flag: '🇸🇪' },
-  { value: 'in', label: 'India',               flag: '🇮🇳' },
-  { value: 'us', label: 'United States',       flag: '🇺🇸' },
-  { value: 'de', label: 'Germany',             flag: '🇩🇪' },
-  { value: 'nz', label: 'New Zealand',         flag: '🇳🇿' },
-  { value: 'sg', label: 'Singapore',           flag: '🇸🇬' },
+  { value: '',   label: 'Auto-detect',    flag: '🌍' },
+  { value: 'ph', label: 'Philippines',    flag: '🇵🇭' },
+  { value: 'ca', label: 'Canada',         flag: '🇨🇦' },
+  { value: 'gb', label: 'United Kingdom', flag: '🇬🇧' },
+  { value: 'au', label: 'Australia',      flag: '🇦🇺' },
+  { value: 'se', label: 'Sweden',         flag: '🇸🇪' },
+  { value: 'in', label: 'India',          flag: '🇮🇳' },
+  { value: 'us', label: 'United States',  flag: '🇺🇸' },
+  { value: 'de', label: 'Germany',        flag: '🇩🇪' },
+  { value: 'nz', label: 'New Zealand',    flag: '🇳🇿' },
+  { value: 'sg', label: 'Singapore',      flag: '🇸🇬' },
 ];
 
 const GEO_FLAGS: Record<string, string> = {
@@ -73,7 +71,6 @@ interface SiteMemoryEntry {
 
 type SiteMemory = Record<string, SiteMemoryEntry>;
 
-// ── Per-site status tracker (from SSE events) ─────────────────────────────────
 interface SiteStatus {
   domain: string;
   url: string;
@@ -85,26 +82,26 @@ interface SiteStatus {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
 function bannerImageUrl(domain: string, localPath?: string): string {
   if (!localPath) return '';
   const filename = localPath.replace(/\\/g, '/').split('/').pop() ?? '';
   return `${BACKEND}/banners/${domain}/${filename}`;
 }
 
-function tierBadge(tier: number) {
-  const colors: Record<number, string> = {
-    1: 'bg-green-900 text-green-300',
-    2: 'bg-blue-900 text-blue-300',
-    3: 'bg-amber-900 text-amber-300',
-    4: 'bg-red-900 text-red-300',
-  };
-  const labels: Record<number, string> = {
-    1: 'T1 Vanilla', 2: 'T2 Stealth', 3: 'T3 Proxy', 4: 'T4 Res',
-  };
+const TIER_META: Record<number, { label: string; color: string; dot: string }> = {
+  1: { label: 'T1 Vanilla', color: 'text-emerald-400',  dot: 'bg-emerald-400' },
+  2: { label: 'T2 Stealth', color: 'text-sky-400',      dot: 'bg-sky-400' },
+  3: { label: 'T3 Proxy',   color: 'text-amber-400',    dot: 'bg-amber-400' },
+  4: { label: 'T4 Resi',    color: 'text-fuchsia-400',  dot: 'bg-fuchsia-400' },
+};
+
+function TierBadge({ tier }: { tier: number }) {
+  const meta = TIER_META[tier];
+  if (!meta) return <span className="text-xs text-slate-500">T{tier}</span>;
   return (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded ${colors[tier] ?? 'bg-slate-700 text-slate-300'}`}>
-      {labels[tier] ?? `Tier ${tier}`}
+    <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${meta.color}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+      {meta.label}
     </span>
   );
 }
@@ -116,23 +113,23 @@ function logLineColor(type: string): string {
     case 'geo_try':    return 'text-sky-400';
     case 'tier_fail':  return 'text-red-400';
     case 'site_done':  return 'text-emerald-400';
-    case 'done':       return 'text-emerald-300 font-semibold';
-    case 'error':      return 'text-red-300';
-    case 'progress':   return 'text-slate-500';
-    default:           return 'text-slate-400';
+    case 'done':       return 'text-emerald-300';
+    case 'error':      return 'text-red-400';
+    case 'progress':   return 'text-slate-600';
+    default:           return 'text-slate-500';
   }
 }
 
-function logLineIcon(type: string): string {
+function logLinePrefix(type: string): string {
   switch (type) {
     case 'site_start': return '▶';
     case 'tier':       return '○';
-    case 'geo_try':    return '⟳';
+    case 'geo_try':    return '↺';
     case 'tier_fail':  return '✗';
     case 'site_done':  return '●';
     case 'done':       return '✓';
     case 'error':      return '!';
-    case 'progress':   return '…';
+    case 'progress':   return '·';
     default:           return '·';
   }
 }
@@ -140,60 +137,95 @@ function logLineIcon(type: string): string {
 function formatLogEvent(ev: ProgressEvent): string {
   if (ev.message) return ev.message;
   switch (ev.type) {
-    case 'start':      return `Starting batch of ${ev.total} site${(ev.total ?? 0) > 1 ? 's' : ''}`;
+    case 'start':      return `Starting batch · ${ev.total} site${(ev.total ?? 0) > 1 ? 's' : ''}`;
     case 'site_start': return `[${ev.domain}] Starting scrape`;
-    case 'tier':       return `[${ev.domain}] ${ev.message ?? `Tier ${ev.tier}`}`;
-    case 'geo_try':    return `[${ev.domain}] Trying geo: ${(ev.geo ?? '').toUpperCase()}`;
-    case 'tier_fail':  return `[${ev.domain}] Tier ${ev.tier}${ev.geo ? ` (${ev.geo.toUpperCase()})` : ''} failed: ${ev.reason ?? 'unknown'}`;
+    case 'tier':       return `[${ev.domain}] Tier ${ev.tier}`;
+    case 'geo_try':    return `[${ev.domain}] Trying geo ${(ev.geo ?? '').toUpperCase()}`;
+    case 'tier_fail':  return `[${ev.domain}] Tier ${ev.tier}${ev.geo ? ` (${ev.geo.toUpperCase()})` : ''} — ${ev.reason ?? 'failed'}`;
     case 'site_done':
       if (ev.result?.success)
-        return `[${ev.domain}] ✓ Tier ${ev.result.tier}${ev.result.geo ? ` (${ev.result.geo.toUpperCase()})` : ''} — ${ev.result.homepageBanners.length} home + ${ev.result.promoBanners.length} promo banners`;
-      return `[${ev.domain}] ✗ Failed — ${ev.result?.error ?? 'all tiers exhausted'}`;
-    case 'done':       return `Batch complete — ${ev.results?.length ?? 0} site(s) processed`;
-    default:           return ev.message ?? ev.type;
+        return `[${ev.domain}] ✓ T${ev.result.tier}${ev.result.geo ? ` ${ev.result.geo.toUpperCase()}` : ''} · ${ev.result.homepageBanners.length}hp ${ev.result.promoBanners.length}pr`;
+      return `[${ev.domain}] ✗ ${ev.result?.error ?? 'all tiers exhausted'}`;
+    case 'done': return `Batch complete · ${ev.results?.length ?? 0} processed`;
+    default:     return ev.message ?? ev.type;
   }
+}
+
+// ── SVG Logo ──────────────────────────────────────────────────────────────────
+function LogoIcon({ size = 36 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <polygon
+        points="18,3 31,9.5 31,26.5 18,33 5,26.5 5,9.5"
+        stroke="#f59e0b"
+        strokeWidth="1.5"
+        fill="rgba(245,158,11,0.06)"
+      />
+      <line x1="10" y1="14" x2="26" y2="14" stroke="#f59e0b" strokeWidth="1" opacity="0.4" />
+      <line x1="9"  y1="18" x2="27" y2="18" stroke="#f59e0b" strokeWidth="1.8" />
+      <line x1="10" y1="22" x2="26" y2="22" stroke="#f59e0b" strokeWidth="1" opacity="0.4" />
+      <circle cx="18" cy="18" r="2.5" fill="#f59e0b" opacity="0.9" />
+    </svg>
+  );
 }
 
 // ── Components ────────────────────────────────────────────────────────────────
 
-function StatusDot({ connected }: { connected: boolean }) {
+function BackendStatus({ connected }: { connected: boolean }) {
   return (
-    <span className="flex items-center gap-1.5 text-xs text-slate-400">
-      <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-500'}`} />
-      {connected ? 'Backend connected' : 'Backend offline'}
-    </span>
+    <div className="flex items-center gap-2">
+      <span
+        className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 status-dot-online' : 'bg-red-500'}`}
+      />
+      <span className={`text-xs font-medium ${connected ? 'text-emerald-400' : 'text-red-400'}`}>
+        {connected ? 'Connected' : 'Offline'}
+      </span>
+    </div>
   );
 }
 
-function SiteStatusRow({ site }: { site: SiteStatus }) {
-  const stateIcon = {
-    pending: <span className="text-slate-500">○</span>,
-    running: <span className="pulse-amber text-amber-400">⟳</span>,
-    done:    <span className="text-emerald-400">✓</span>,
-    failed:  <span className="text-red-400">✗</span>,
-  }[site.state];
+function SiteStatusCard({ site }: { site: SiteStatus }) {
+  const stateColors = {
+    pending: 'bg-slate-700',
+    running: 'bg-amber-400',
+    done:    'bg-emerald-400',
+    failed:  'bg-red-500',
+  };
 
   return (
-    <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
-      <span className="text-lg">{stateIcon}</span>
-      <span className="font-medium text-slate-200 truncate max-w-[200px]">{site.domain}</span>
-      {site.currentTier !== undefined && site.state === 'running' && (
-        <span className="text-xs text-slate-500">
-          Tier {site.currentTier}
-          {site.currentGeo ? ` · ${(GEO_FLAGS[site.currentGeo] ?? '')} ${site.currentGeo.toUpperCase()}` : ''}
-        </span>
-      )}
+    <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-surface-2 border border-border hover:border-border-2 transition-colors">
+      {/* Status bar */}
+      <span className={`w-0.5 h-8 rounded-full flex-shrink-0 ${stateColors[site.state]} ${site.state === 'running' ? 'pulse-amber' : ''}`} />
+
+      {/* Domain */}
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-slate-100 truncate">{site.domain}</div>
+        {site.state === 'running' && (
+          <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+            <span className="spin text-amber-400 text-[10px]">⟳</span>
+            {site.currentTier !== undefined && `Tier ${site.currentTier}`}
+            {site.currentGeo && ` · ${(GEO_FLAGS[site.currentGeo] ?? '')} ${site.currentGeo.toUpperCase()}`}
+          </div>
+        )}
+        {site.state === 'pending' && <div className="text-[11px] text-slate-600 mt-0.5">Waiting…</div>}
+      </div>
+
+      {/* Result meta */}
       {site.result && (
-        <div className="ml-auto flex items-center gap-2 text-xs text-slate-400">
-          {tierBadge(site.result.tier)}
-          {site.result.geo && <span>{GEO_FLAGS[site.result.geo] ?? site.result.geo.toUpperCase()}</span>}
-          <span className="text-slate-300">
-            {site.result.homepageBanners.length}hp + {site.result.promoBanners.length}pr
-          </span>
+        <div className="flex-shrink-0 text-right">
+          <TierBadge tier={site.result.tier} />
+          {site.result.geo && (
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              {GEO_FLAGS[site.result.geo] ?? site.result.geo.toUpperCase()}&nbsp;
+              {site.result.homepageBanners.length + site.result.promoBanners.length} banners
+            </div>
+          )}
         </div>
       )}
       {site.state === 'failed' && !site.result && (
-        <span className="ml-auto text-xs text-red-400 truncate max-w-[200px]">{site.message ?? 'Failed'}</span>
+        <span className="text-[11px] text-red-400 max-w-[120px] truncate text-right flex-shrink-0">
+          {site.message ?? 'Failed'}
+        </span>
       )}
     </div>
   );
@@ -203,45 +235,49 @@ function BannerCard({ banner, domain }: { banner: BannerImage; domain: string })
   const imgUrl = banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
   const [loaded, setLoaded] = useState(false);
   const [error, setError]   = useState(false);
-  const label = banner.page === 'promotions' ? 'Promo' : 'Home';
 
   return (
-    <div className="group relative rounded-lg overflow-hidden border border-slate-700 hover:border-amber-500 transition-colors bg-slate-800">
-      {/* Page type badge */}
-      <span className={`absolute top-1.5 left-1.5 z-10 text-[10px] font-bold px-1.5 py-0.5 rounded ${
+    <div className="group relative rounded-lg overflow-hidden border border-border hover:border-accent transition-all duration-200 bg-surface-2">
+      {/* Page badge */}
+      <span className={`absolute top-2 left-2 z-10 text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm ${
         banner.page === 'promotions'
-          ? 'bg-violet-700 text-violet-100'
-          : 'bg-sky-800 text-sky-200'
+          ? 'bg-fuchsia-900/80 text-fuchsia-200 border border-fuchsia-700/50'
+          : 'bg-sky-900/80 text-sky-200 border border-sky-700/50'
       }`}>
-        {label}
+        {banner.page === 'promotions' ? 'PROMO' : 'HOME'}
       </span>
 
       {/* Image */}
-      <a href={banner.src} target="_blank" rel="noopener noreferrer">
+      <a href={banner.src} target="_blank" rel="noopener noreferrer" className="block">
         {!error ? (
-          <img
-            src={imgUrl || banner.src}
-            alt={banner.altText ?? `Banner ${banner.width}×${banner.height}`}
-            onLoad={() => setLoaded(true)}
-            onError={() => setError(true)}
-            className={`w-full object-cover transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`}
-            style={{ aspectRatio: `${Math.min(banner.aspectRatio, 4)} / 1` }}
-          />
+          <>
+            <img
+              src={imgUrl || banner.src}
+              alt={banner.altText ?? `Banner ${banner.width}×${banner.height}`}
+              onLoad={() => setLoaded(true)}
+              onError={() => setError(true)}
+              className={`w-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+              style={{ aspectRatio: `${Math.min(banner.aspectRatio, 4)} / 1` }}
+            />
+            {!loaded && <div className="shimmer w-full" style={{ aspectRatio: '3/1' }} />}
+          </>
         ) : (
-          // Fallback: link to original source
-          <div className="flex items-center justify-center h-20 text-slate-600 text-sm">
-            Image not cached (click to view original)
+          <div className="flex flex-col items-center justify-center gap-1 py-6 text-slate-600">
+            <span className="text-lg">⊘</span>
+            <span className="text-[11px]">Click to view</span>
           </div>
-        )}
-        {!loaded && !error && (
-          <div className="absolute inset-0 bg-slate-700 animate-pulse" />
         )}
       </a>
 
-      {/* Meta */}
-      <div className="px-2 py-1.5 text-[11px] text-slate-400 flex justify-between">
+      {/* Hover overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none flex items-end p-2">
+        <span className="text-[11px] text-white/80">{banner.width}×{banner.height}</span>
+      </div>
+
+      {/* Bottom meta */}
+      <div className="px-2.5 py-1.5 flex items-center justify-between text-[10px] text-slate-600 border-t border-border">
         <span>{banner.width}×{banner.height}</span>
-        <span className="text-slate-600">score {banner.score.toFixed(0)}</span>
+        <span>score {banner.score.toFixed(0)}</span>
       </div>
     </div>
   );
@@ -250,25 +286,25 @@ function BannerCard({ banner, domain }: { banner: BannerImage; domain: string })
 function ResultCard({ result }: { result: ScrapeResult }) {
   const allBanners = [...result.homepageBanners, ...result.promoBanners];
   return (
-    <div className="border border-slate-700 rounded-xl overflow-hidden">
-      {/* Header row */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-slate-800">
-        <span className={result.success ? 'text-emerald-400 text-xl' : 'text-red-400 text-xl'}>
+    <div className={`card overflow-hidden ${result.success ? '' : 'border-red-900/50'}`}>
+      {/* Header */}
+      <div className={`flex items-center gap-3 px-5 py-3.5 ${result.success ? 'bg-surface-2' : 'bg-red-950/20'}`}>
+        <span className={`text-lg font-bold ${result.success ? 'text-emerald-400' : 'text-red-400'}`}>
           {result.success ? '✓' : '✗'}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-slate-100">{result.domain}</div>
-          <div className="text-xs text-slate-500 truncate">{result.url}</div>
+          <div className="font-semibold text-slate-100 tracking-tight">{result.domain}</div>
+          <div className="text-[11px] text-slate-500 font-mono truncate">{result.url}</div>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {result.success && tierBadge(result.tier)}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {result.success && <TierBadge tier={result.tier} />}
           {result.geo && (
             <span className="text-sm" title={result.geo.toUpperCase()}>
               {GEO_FLAGS[result.geo] ?? result.geo.toUpperCase()}
             </span>
           )}
-          {result.success && (
-            <span className="text-xs text-slate-400">
+          {result.success && allBanners.length > 0 && (
+            <span className="text-xs text-slate-400 bg-surface-3 px-2 py-0.5 rounded-full border border-border">
               {allBanners.length} banner{allBanners.length !== 1 ? 's' : ''}
             </span>
           )}
@@ -277,23 +313,23 @@ function ResultCard({ result }: { result: ScrapeResult }) {
 
       {/* Banners grid */}
       {allBanners.length > 0 ? (
-        <div className="p-3 bg-slate-900/50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+        <div className="p-3 bg-surface/50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           {allBanners.map((b, i) => (
             <BannerCard key={`${b.src}-${i}`} banner={b} domain={result.domain} />
           ))}
         </div>
       ) : result.success ? (
-        <div className="px-4 py-3 text-slate-500 text-sm">No banners detected</div>
+        <div className="px-5 py-4 text-slate-600 text-sm">No banners detected on this site.</div>
       ) : (
-        <div className="px-4 py-3 text-red-400 text-sm">{result.error}</div>
+        <div className="px-5 py-4 text-red-400/80 text-sm leading-relaxed">{result.error}</div>
       )}
     </div>
   );
 }
 
 function SiteMemoryTable({ memory, onUpdate }: { memory: SiteMemory; onUpdate: () => void }) {
-  const entries = Object.entries(memory).sort((a, b) =>
-    new Date(b[1].lastScraped).getTime() - new Date(a[1].lastScraped).getTime()
+  const entries = Object.entries(memory).sort(
+    (a, b) => new Date(b[1].lastScraped).getTime() - new Date(a[1].lastScraped).getTime()
   );
 
   const handleGeoChange = async (domain: string, geo: string) => {
@@ -311,47 +347,55 @@ function SiteMemoryTable({ memory, onUpdate }: { memory: SiteMemory; onUpdate: (
   };
 
   if (entries.length === 0) {
-    return <p className="mt-4 text-slate-500 text-sm">No sites scraped yet.</p>;
+    return (
+      <div className="flex flex-col items-center gap-2 py-10 text-slate-600">
+        <span className="text-2xl opacity-30">◫</span>
+        <span className="text-sm">No sites scraped yet</span>
+      </div>
+    );
   }
 
   return (
-    <div className="mt-4 overflow-x-auto">
+    <div className="overflow-x-auto">
       <table className="w-full text-sm border-collapse">
         <thead>
-          <tr className="text-left text-slate-500 text-xs border-b border-slate-700">
-            <th className="pb-2 pr-4 font-medium">Domain</th>
-            <th className="pb-2 pr-4 font-medium">Tier</th>
-            <th className="pb-2 pr-4 font-medium">Geo</th>
-            <th className="pb-2 pr-4 font-medium">Last scraped</th>
-            <th className="pb-2 font-medium">Actions</th>
+          <tr className="text-left border-b border-border">
+            <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Domain</th>
+            <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Tier</th>
+            <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Geo</th>
+            <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Last Scraped</th>
+            <th className="pb-3 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Actions</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-border">
           {entries.map(([domain, entry]) => (
-            <tr key={domain} className="border-b border-slate-800 hover:bg-slate-800/30">
-              <td className="py-2 pr-4 text-slate-200 font-medium">{domain}</td>
-              <td className="py-2 pr-4">{tierBadge(entry.lastSuccessfulTier)}</td>
-              <td className="py-2 pr-4">
+            <tr key={domain} className="group hover:bg-surface-2/50 transition-colors">
+              <td className="py-3 pr-6 font-medium text-slate-200">{domain}</td>
+              <td className="py-3 pr-6">
+                <TierBadge tier={entry.lastSuccessfulTier} />
+              </td>
+              <td className="py-3 pr-6">
                 <select
                   value={entry.workingGeo ?? ''}
                   onChange={e => handleGeoChange(domain, e.target.value)}
-                  className="bg-slate-800 border border-slate-600 rounded px-2 py-0.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                  className="bg-surface-3 border border-border hover:border-border-2 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent transition-colors cursor-pointer"
                 >
                   {GEO_OPTIONS.map(o => (
                     <option key={o.value} value={o.value}>
-                      {o.value ? `${o.flag} ${o.value.toUpperCase()}` : 'Auto'}
+                      {o.value ? `${o.flag} ${o.value.toUpperCase()}` : '🌍 Auto'}
                     </option>
                   ))}
                 </select>
               </td>
-              <td className="py-2 pr-4 text-slate-500 text-xs">
-                {new Date(entry.lastScraped).toLocaleDateString()} {new Date(entry.lastScraped).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <td className="py-3 pr-6 text-slate-500 text-xs font-mono">
+                {new Date(entry.lastScraped).toLocaleDateString()}&nbsp;
+                {new Date(entry.lastScraped).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </td>
-              <td className="py-2">
+              <td className="py-3">
                 <button
                   onClick={() => handleDelete(domain)}
-                  title="Reset — remove from memory so tier re-detection runs on next scrape"
-                  className="text-red-500 hover:text-red-400 text-xs px-2 py-0.5 rounded border border-red-900 hover:border-red-500 transition-colors"
+                  title="Reset cached tier/geo — runs full re-detection on next scrape"
+                  className="text-xs text-red-500/70 hover:text-red-400 border border-red-900/40 hover:border-red-800 px-2.5 py-1 rounded-lg transition-colors"
                 >
                   Reset
                 </button>
@@ -365,20 +409,18 @@ function SiteMemoryTable({ memory, onUpdate }: { memory: SiteMemory; onUpdate: (
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-
 export default function Home() {
-  const [urlsText, setUrlsText]       = useState('');
-  const [geo, setGeo]                 = useState('');
-  const [scraping, setScraping]       = useState(false);
-  const [logEvents, setLogEvents]     = useState<ProgressEvent[]>([]);
-  const [siteStatuses, setSiteStatuses] = useState<SiteStatus[]>([]);
-  const [results, setResults]         = useState<ScrapeResult[]>([]);
-  const [siteMemory, setSiteMemory]   = useState<SiteMemory>({});
-  const [showMemory, setShowMemory]   = useState(false);
+  const [urlsText, setUrlsText]           = useState('');
+  const [geo, setGeo]                     = useState('');
+  const [scraping, setScraping]           = useState(false);
+  const [logEvents, setLogEvents]         = useState<ProgressEvent[]>([]);
+  const [siteStatuses, setSiteStatuses]   = useState<SiteStatus[]>([]);
+  const [results, setResults]             = useState<ScrapeResult[]>([]);
+  const [siteMemory, setSiteMemory]       = useState<SiteMemory>({});
+  const [showMemory, setShowMemory]       = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  // ── Check backend health ──────────────────────────────────────────────────
   const checkBackend = useCallback(async () => {
     try {
       const r = await fetch(`${BACKEND}/health`, { signal: AbortSignal.timeout(5000) });
@@ -386,15 +428,14 @@ export default function Home() {
     } catch {
       setBackendOnline(false);
     }
-  }, [BACKEND]);
+  }, []);
 
-  // ── Load site memory ──────────────────────────────────────────────────────
   const loadMemory = useCallback(async () => {
     try {
       const r = await fetch(`${BACKEND}/sites`);
       if (r.ok) setSiteMemory(await r.json());
     } catch { /* offline */ }
-  }, [BACKEND]);
+  }, []);
 
   useEffect(() => {
     checkBackend();
@@ -403,12 +444,10 @@ export default function Home() {
     return () => clearInterval(iv);
   }, [checkBackend, loadMemory]);
 
-  // Auto-scroll log
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logEvents]);
 
-  // ── Start scrape ──────────────────────────────────────────────────────────
   const handleScrape = useCallback(() => {
     const urls = urlsText.split('\n').map(u => u.trim()).filter(Boolean);
     if (urls.length === 0 || scraping) return;
@@ -433,7 +472,6 @@ export default function Home() {
 
       setLogEvents(prev => [...prev, event]);
 
-      // Update per-site status
       if (event.domain) {
         setSiteStatuses(prev => prev.map(s => {
           if (s.domain !== event.domain) return s;
@@ -466,160 +504,222 @@ export default function Home() {
       setScraping(false);
       setLogEvents(prev => [...prev, {
         type: 'error',
-        message: 'Connection to backend lost. Is the server running on port 3001?',
+        message: 'Connection lost — is the backend running on port 3001?',
       }]);
     };
   }, [urlsText, geo, scraping, loadMemory]);
 
   const urlCount = urlsText.split('\n').filter(l => l.trim()).length;
+  const isActive = scraping || logEvents.length > 0;
 
   return (
-    <main className="min-h-screen bg-[#0a0f1a] text-slate-100 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-5xl mx-auto space-y-6">
+    <main className="relative min-h-screen text-slate-100 py-8 px-4 sm:px-6 lg:px-10">
+      <div className="relative z-10 max-w-6xl mx-auto space-y-6">
 
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-amber-400">
-              🎰 Casino Banner Scraper
-            </h1>
-            <p className="text-slate-500 text-sm mt-0.5">
-              Progressive-tier scraper with auto geo-detection
-            </p>
-          </div>
-          <StatusDot connected={backendOnline} />
-        </div>
-
-        {/* ── URL Input card ── */}
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              Target URLs
-              <span className="text-slate-600 font-normal ml-2">(one per line)</span>
-            </label>
-            <textarea
-              value={urlsText}
-              onChange={e => setUrlsText(e.target.value)}
-              placeholder={"https://www.bet365.com\nhttps://www.casumo.com\nhttps://www.novadreams.com"}
-              rows={5}
-              disabled={scraping}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm font-mono text-slate-100 placeholder-slate-700 focus:outline-none focus:border-amber-500 transition-colors resize-y disabled:opacity-50"
-            />
+        {/* ── Header ────────────────────────────────────────────────────────── */}
+        <header className="flex items-center justify-between py-2">
+          <div className="flex items-center gap-3.5">
+            <LogoIcon size={38} />
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-slate-100">
+                BannerBot
+              </h1>
+              <p className="text-[11px] text-slate-500 tracking-widest uppercase mt-0.5">
+                Casino Intelligence Platform
+              </p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Geo selector */}
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-slate-400 whitespace-nowrap">Geo override:</label>
+          <div className="flex items-center gap-4">
+            <BackendStatus connected={backendOnline} />
+            <span className="hidden sm:block text-[10px] font-mono text-border-2 border border-border px-2 py-1 rounded-md">
+              v2.0
+            </span>
+          </div>
+        </header>
+
+        {/* ── Input card ────────────────────────────────────────────────────── */}
+        <section className="card p-6 space-y-5">
+
+          {/* Step label */}
+          <div className="section-label">
+            <span className="step-num">01</span>
+            Target URLs
+          </div>
+
+          {/* URL textarea */}
+          <textarea
+            value={urlsText}
+            onChange={e => setUrlsText(e.target.value)}
+            placeholder={"https://www.bet365.com\nhttps://www.casumo.com\nhttps://www.novadreams.com"}
+            rows={5}
+            disabled={scraping}
+            className="w-full bg-surface-3 border border-border hover:border-border-2 focus:border-accent rounded-xl p-4 text-sm font-mono text-slate-100 placeholder-slate-700 focus:outline-none transition-colors resize-y disabled:opacity-50 leading-relaxed"
+          />
+
+          {/* Controls row */}
+          <div className="flex flex-wrap items-center gap-3">
+
+            {/* Geo picker */}
+            <div className="flex items-center gap-2.5">
+              <div className="section-label text-[10px]">
+                <span className="step-num">02</span>
+                Geo
+              </div>
               <select
                 value={geo}
                 onChange={e => setGeo(e.target.value)}
                 disabled={scraping}
-                className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500 transition-colors disabled:opacity-50"
+                className="bg-surface-3 border border-border hover:border-border-2 focus:border-accent rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none transition-colors disabled:opacity-50 cursor-pointer"
               >
                 {GEO_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>
-                    {o.flag} {o.label}
+                    {o.flag}&nbsp; {o.label}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div className="text-xs text-slate-600">
-              {geo === ''
-                ? 'Will use stored geo from memory, or auto-detect on first visit'
-                : `Will force ${geo.toUpperCase()} for all sites this run`}
-            </div>
+            {geo === '' ? (
+              <span className="text-[11px] text-slate-600 hidden sm:block">
+                Auto-detect — uses stored geo or tries all countries
+              </span>
+            ) : (
+              <span className="text-[11px] text-accent-light hidden sm:block">
+                Force {geo.toUpperCase()} for all sites this run
+              </span>
+            )}
 
             {/* Scrape button */}
             <button
               onClick={handleScrape}
               disabled={scraping || urlCount === 0 || !backendOnline}
-              className="ml-auto flex items-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-600 disabled:border disabled:border-slate-700 text-slate-950 font-bold px-5 py-2 rounded-xl transition-all"
+              className="btn-primary ml-auto flex items-center gap-2.5 text-sm"
             >
               {scraping ? (
-                <><span className="pulse-amber">⟳</span> Scraping…</>
+                <>
+                  <span className="spin text-base">⟳</span>
+                  Scraping…
+                </>
               ) : (
-                <>▶ Scrape {urlCount > 0 ? `${urlCount} site${urlCount !== 1 ? 's' : ''}` : ''}</>
+                <>
+                  <span>▶</span>
+                  Scrape{urlCount > 0 ? ` ${urlCount} site${urlCount !== 1 ? 's' : ''}` : ''}
+                </>
               )}
             </button>
           </div>
 
+          {/* Offline warning */}
           {!backendOnline && (
-            <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">
-              Backend is offline. Start it with: <code className="font-mono bg-slate-800 px-1 rounded">npm run server</code> (from the BannerScrapper folder)
-            </p>
+            <div className="flex items-start gap-3 text-[12px] text-red-400/90 bg-red-950/20 border border-red-900/30 rounded-xl px-4 py-3">
+              <span className="mt-0.5 flex-shrink-0">⚠</span>
+              <span>
+                Backend offline — run&nbsp;
+                <code className="font-mono text-red-300 bg-red-950/40 px-1.5 py-0.5 rounded">npm run server</code>
+                &nbsp;from the BannerScrapper folder.
+              </span>
+            </div>
           )}
         </section>
 
-        {/* ── Progress section ── */}
-        {(scraping || logEvents.length > 0) && (
-          <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-            <h2 className="text-base font-semibold text-slate-200">
-              {scraping ? <><span className="pulse-amber">⟳</span> Scraping in progress…</> : 'Progress log'}
-            </h2>
-
-            {/* Per-site status cards */}
-            {siteStatuses.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {siteStatuses.map(s => <SiteStatusRow key={s.domain} site={s} />)}
+        {/* ── Progress ──────────────────────────────────────────────────────── */}
+        {isActive && (
+          <section className={`card overflow-hidden ${scraping ? 'active' : ''}`}>
+            {/* Section header */}
+            <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border bg-surface-2/50">
+              <div className="section-label">
+                {scraping
+                  ? <><span className="spin text-amber-400">⟳</span> Live</>
+                  : '● Complete'
+                }
               </div>
-            )}
+              {siteStatuses.length > 0 && (
+                <span className="ml-auto text-[11px] text-slate-600">
+                  {siteStatuses.filter(s => s.state === 'done').length}/
+                  {siteStatuses.length} done
+                </span>
+              )}
+            </div>
 
-            {/* SSE log */}
-            <div className="bg-slate-950 rounded-xl p-3 h-48 overflow-y-auto font-mono text-xs space-y-0.5">
-              {logEvents.map((ev, i) => (
-                <div key={i} className={`log-entry flex gap-2 ${logLineColor(ev.type)}`}>
-                  <span className="flex-shrink-0 w-3">{logLineIcon(ev.type)}</span>
-                  <span>{formatLogEvent(ev)}</span>
+            <div className={`${siteStatuses.length > 0 ? 'grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border' : ''}`}>
+
+              {/* Site status list */}
+              {siteStatuses.length > 0 && (
+                <div className="p-4 space-y-2">
+                  <div className="section-label mb-3">Sites</div>
+                  {siteStatuses.map(s => <SiteStatusCard key={s.domain} site={s} />)}
                 </div>
-              ))}
-              <div ref={logEndRef} />
+              )}
+
+              {/* Terminal log */}
+              <div className="p-4">
+                <div className="section-label mb-3">Terminal</div>
+                <div className="terminal h-52 overflow-y-auto p-3 space-y-0.5">
+                  {logEvents.map((ev, i) => (
+                    <div key={i} className={`log-entry flex gap-2 items-baseline ${logLineColor(ev.type)}`}>
+                      <span className="flex-shrink-0 w-3 text-center">{logLinePrefix(ev.type)}</span>
+                      <span className="break-all">{formatLogEvent(ev)}</span>
+                    </div>
+                  ))}
+                  <div ref={logEndRef} />
+                </div>
+              </div>
             </div>
           </section>
         )}
 
-        {/* ── Results ── */}
+        {/* ── Results ───────────────────────────────────────────────────────── */}
         {results.length > 0 && (
           <section className="space-y-4">
-            <h2 className="text-base font-semibold text-slate-200">
-              Results
-              <span className="text-slate-600 font-normal ml-2">
-                — {results.filter(r => r.success).length}/{results.length} succeeded
+            <div className="section-label">
+              <span className="step-num">Results</span>
+              <span className="text-slate-600 font-normal normal-case tracking-normal text-xs ml-1">
+                {results.filter(r => r.success).length} of {results.length} succeeded
               </span>
-            </h2>
+            </div>
             {results.map(r => (
               <ResultCard key={r.domain} result={r} />
             ))}
           </section>
         )}
 
-        {/* ── Site Memory ── */}
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        {/* ── Site Memory ───────────────────────────────────────────────────── */}
+        <section className="card overflow-hidden">
           <button
             onClick={() => {
               setShowMemory(v => !v);
               if (!showMemory) loadMemory();
             }}
-            className="flex items-center gap-2 text-base font-semibold text-slate-200 hover:text-amber-400 transition-colors"
+            className="w-full flex items-center gap-3 px-5 py-4 hover:bg-surface-2/40 transition-colors text-left"
           >
-            <span className="text-slate-500">{showMemory ? '▼' : '▶'}</span>
-            Site Memory
-            <span className="text-slate-600 font-normal text-sm ml-1">
-              — {Object.keys(siteMemory).length} site{Object.keys(siteMemory).length !== 1 ? 's' : ''} cached
+            <div className="section-label flex-1">
+              <span className="step-num">Memory</span>
+              Site Cache
+            </div>
+            <span className="text-[11px] text-slate-600">
+              {Object.keys(siteMemory).length} site{Object.keys(siteMemory).length !== 1 ? 's' : ''}
+            </span>
+            <span className={`text-slate-600 text-xs transition-transform duration-200 ${showMemory ? 'rotate-180' : ''}`}>
+              ▾
             </span>
           </button>
 
           {showMemory && (
-            <>
-              <p className="text-xs text-slate-600 mt-2">
-                Change a site's geo to force a specific country next time it's scraped.
-                Click <strong>Reset</strong> to clear cached tier/geo (runs full re-detection on next scrape).
+            <div className="border-t border-border px-5 pb-5">
+              <p className="text-[11px] text-slate-600 py-3">
+                Change a site&apos;s geo to force a specific country on next scrape.
+                &nbsp;<strong className="text-slate-500">Reset</strong> clears cached tier and geo — runs full re-detection.
               </p>
               <SiteMemoryTable memory={siteMemory} onUpdate={loadMemory} />
-            </>
+            </div>
           )}
         </section>
+
+        {/* ── Footer ───────────────────────────────────────────────────────── */}
+        <footer className="text-center text-[11px] text-slate-700 pb-4">
+          BannerBot · 4-tier progressive escalation · Tier 1 vanilla → Tier 4 residential proxy
+        </footer>
 
       </div>
     </main>

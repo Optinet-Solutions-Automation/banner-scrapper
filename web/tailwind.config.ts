@@ -7,11 +7,25 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['var(--font-inter)', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        mono: ['var(--font-mono)', 'JetBrains Mono', 'Fira Code', 'monospace'],
+      },
       colors: {
-        slate: {
-          750: '#293548',
-          850: '#172033',
-          950: '#0a0f1a',
+        bg: '#07090f',
+        surface: {
+          DEFAULT: '#0c1120',
+          2: '#101928',
+          3: '#141f30',
+        },
+        border: {
+          DEFAULT: '#1a2540',
+          2: '#243452',
+          hot: '#2e4880',
+        },
+        accent: {
+          DEFAULT: '#4070d4',
+          light: '#6090f0',
         },
       },
     },
