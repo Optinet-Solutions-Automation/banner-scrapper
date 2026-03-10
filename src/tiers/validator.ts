@@ -99,6 +99,28 @@ export async function validatePageSuccess(page: Page, tier: number): Promise<Tie
     return { success: false, failureReason: FailureReason.BOT_DETECTED, tier };
   }
 
+  // ── Rate-limited (429) ────────────────────────────────────────────────────
+  if (
+    titleLower.includes('429') ||
+    titleLower.includes('too many requests') ||
+    bodyLower.includes('too many requests') ||
+    /rate.?limit(ed)?/i.test(bodyText)
+  ) {
+    return { success: false, failureReason: FailureReason.ACCESS_DENIED, statusCode: 429, tier };
+  }
+
+  // ── Maintenance / 503 ─────────────────────────────────────────────────────
+  if (
+    /site.*under.*maintenance/i.test(bodyText) ||
+    /down for maintenance/i.test(bodyText) ||
+    /scheduled maintenance/i.test(bodyText) ||
+    /temporarily.*unavailable/i.test(bodyText) ||
+    titleLower.includes('under maintenance') ||
+    titleLower.includes('503 service')
+  ) {
+    return { success: false, failureReason: FailureReason.EMPTY_PAGE, tier };
+  }
+
   // ── Hard proxy block (completely blank response) ─────────────────────────
   // A datacenter IP that is hard-blocked by the site receives an empty 200 OK:
   // no title, no body text, no images. This is NOT an SPA still loading — those

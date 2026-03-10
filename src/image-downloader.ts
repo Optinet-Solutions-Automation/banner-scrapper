@@ -27,23 +27,18 @@ export async function downloadBanners(
   const dir = path.join(config.outputDir, sanitizeFilename(domain), pageType);
   fs.mkdirSync(dir, { recursive: true });
 
-  const downloaded: BannerImage[] = [];
-
   // Derive origin for Referer header (CDNs and Next.js image proxy reject headerless requests)
   const siteOrigin = (() => {
     try { return new URL(`https://${domain}`).origin; } catch { return `https://${domain}`; }
   })();
 
-  for (let i = 0; i < banners.length; i++) {
-    const banner = banners[i];
-
+  const downloadOne = async (banner: BannerImage, i: number): Promise<BannerImage | null> => {
     // Use the image's own origin as Referer — avoids www. vs non-www mismatch
     const referer = (() => {
       try { return new URL(banner.src).origin + '/'; } catch { return `${siteOrigin}/`; }
     })();
 
-    let saved = false;
-    for (let attempt = 1; attempt <= 3 && !saved; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const response = await context.request.get(banner.src, {
           timeout: 45_000,
@@ -58,17 +53,28 @@ export async function downloadBanners(
         });
         if (!response.ok()) {
           console.warn(`    ⚠ Download failed (${response.status()}): ${banner.src}`);
-          break;  // non-retriable HTTP error
+          return null;  // non-retriable HTTP error
         }
+
         const body        = await response.body();
         const contentType = response.headers()['content-type'] ?? '';
-        const ext         = inferExtension(banner.src, contentType);
-        const filename    = `banner_${String(i + 1).padStart(2, '0')}${ext}`;
-        const filepath    = path.join(dir, filename);
+
+        // Integrity check: reject HTML error pages served as 200
+        if (!contentType.startsWith('image/') && !contentType.includes('octet-stream')) {
+          console.warn(`    ⚠ Non-image content-type "${contentType.split(';')[0]}" — skipping: ${banner.src.substring(0, 80)}`);
+          return null;
+        }
+        if (body.length < 2048) {
+          console.warn(`    ⚠ Suspiciously small file (${body.length}B) — skipping: ${banner.src.substring(0, 80)}`);
+          return null;
+        }
+
+        const ext      = inferExtension(banner.src, contentType);
+        const filename = `banner_${String(i + 1).padStart(2, '0')}${ext}`;
+        const filepath = path.join(dir, filename);
         fs.writeFileSync(filepath, body);
         console.log(`    ✓ Saved ${filename} (${banner.width}x${banner.height}) score=${banner.score}`);
-        downloaded.push({ ...banner, localPath: filepath });
-        saved = true;
+        return { ...banner, localPath: filepath };
       } catch (err) {
         const msg = (err as Error).message ?? '';
         const isRetriable = msg.includes('ECONNRESET') || msg.includes('ECONNREFUSED') ||
@@ -78,8 +84,23 @@ export async function downloadBanners(
           await new Promise(r => setTimeout(r, 2000 * attempt)); // 2s, 4s backoff
         } else {
           console.warn(`    ⚠ Error downloading ${banner.src.substring(0, 80)}: ${msg.split('\n')[0]}`);
+          return null;
         }
       }
+    }
+    return null;
+  };
+
+  // Download all banners in parallel (up to 5 concurrent)
+  const CONCURRENCY = 5;
+  const downloaded: BannerImage[] = [];
+  for (let offset = 0; offset < banners.length; offset += CONCURRENCY) {
+    const batch = banners.slice(offset, offset + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map((banner, j) => downloadOne(banner, offset + j))
+    );
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) downloaded.push(r.value);
     }
   }
 

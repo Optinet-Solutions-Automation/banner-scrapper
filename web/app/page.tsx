@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
@@ -86,6 +86,10 @@ function bannerImageUrl(domain: string, localPath?: string): string {
   if (!localPath) return '';
   const filename = localPath.replace(/\\/g, '/').split('/').pop() ?? '';
   return `${BACKEND}/banners/${domain}/${filename}`;
+}
+
+function isValidUrl(s: string): boolean {
+  try { new URL(s); return true; } catch { return false; }
 }
 
 const TIER_META: Record<number, { label: string; color: string; dot: string }> = {
@@ -231,13 +235,98 @@ function SiteStatusCard({ site }: { site: SiteStatus }) {
   );
 }
 
-function BannerCard({ banner, domain }: { banner: BannerImage; domain: string }) {
+function LightboxModal({
+  banner, domain, onClose,
+}: { banner: BannerImage; domain: string; onClose: () => void }) {
+  const imgUrl = banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
+  const displayUrl = imgUrl || banner.src;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-4xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="card overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 bg-surface-2 border-b border-border">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                banner.page === 'promotions'
+                  ? 'bg-fuchsia-900/80 text-fuchsia-200 border border-fuchsia-700/50'
+                  : 'bg-sky-900/80 text-sky-200 border border-sky-700/50'
+              }`}>{banner.page === 'promotions' ? 'PROMO' : 'HOME'}</span>
+              <span className="text-xs text-slate-400 font-mono truncate">
+                {banner.width}×{banner.height} · score {banner.score.toFixed(0)} · AR {banner.aspectRatio}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+              <a
+                href={displayUrl}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-accent hover:text-accent-light border border-border hover:border-border-2 px-2.5 py-1 rounded-lg transition-colors"
+                onClick={e => e.stopPropagation()}
+              >
+                ↓ Download
+              </a>
+              <a
+                href={banner.src}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-slate-400 hover:text-slate-200 border border-border hover:border-border-2 px-2.5 py-1 rounded-lg transition-colors"
+                onClick={e => e.stopPropagation()}
+              >
+                ↗ Source
+              </a>
+              <button
+                onClick={onClose}
+                className="text-slate-400 hover:text-slate-100 text-xl w-7 h-7 flex items-center justify-center rounded-lg hover:bg-surface-3 transition-colors"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          {/* Image */}
+          <div className="bg-surface/80 flex items-center justify-center p-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={displayUrl}
+              alt={banner.altText ?? `Banner ${banner.width}×${banner.height}`}
+              className="max-w-full max-h-[70vh] object-contain rounded-lg"
+            />
+          </div>
+          {/* Footer */}
+          {banner.altText && (
+            <div className="px-4 py-2 bg-surface-2 border-t border-border text-[11px] text-slate-500 truncate">
+              alt: &quot;{banner.altText}&quot;
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BannerCard({
+  banner, domain, onOpenLightbox,
+}: { banner: BannerImage; domain: string; onOpenLightbox: () => void }) {
   const imgUrl = banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
   const [loaded, setLoaded] = useState(false);
   const [error, setError]   = useState(false);
 
   return (
-    <div className="group relative rounded-lg overflow-hidden border border-border hover:border-accent transition-all duration-200 bg-surface-2">
+    <div className="group relative rounded-lg overflow-hidden border border-border hover:border-accent transition-all duration-200 bg-surface-2 cursor-pointer">
       {/* Page badge */}
       <span className={`absolute top-2 left-2 z-10 text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm ${
         banner.page === 'promotions'
@@ -247,10 +336,11 @@ function BannerCard({ banner, domain }: { banner: BannerImage; domain: string })
         {banner.page === 'promotions' ? 'PROMO' : 'HOME'}
       </span>
 
-      {/* Image */}
-      <a href={banner.src} target="_blank" rel="noopener noreferrer" className="block">
+      {/* Image — click opens lightbox */}
+      <button className="block w-full text-left" onClick={onOpenLightbox}>
         {!error ? (
           <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imgUrl || banner.src}
               alt={banner.altText ?? `Banner ${banner.width}×${banner.height}`}
@@ -264,14 +354,14 @@ function BannerCard({ banner, domain }: { banner: BannerImage; domain: string })
         ) : (
           <div className="flex flex-col items-center justify-center gap-1 py-6 text-slate-600">
             <span className="text-lg">⊘</span>
-            <span className="text-[11px]">Click to view</span>
+            <span className="text-[11px]">Image unavailable</span>
           </div>
         )}
-      </a>
+      </button>
 
       {/* Hover overlay */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none flex items-end p-2">
-        <span className="text-[11px] text-white/80">{banner.width}×{banner.height}</span>
+        <span className="text-[11px] text-white/80">{banner.width}×{banner.height} · click to expand</span>
       </div>
 
       {/* Bottom meta */}
@@ -283,7 +373,14 @@ function BannerCard({ banner, domain }: { banner: BannerImage; domain: string })
   );
 }
 
-function ResultCard({ result }: { result: ScrapeResult }) {
+function ResultCard({
+  result, onRerun, onOpenLightbox, canRerun,
+}: {
+  result: ScrapeResult;
+  onRerun: (url: string) => void;
+  onOpenLightbox: (banner: BannerImage, domain: string) => void;
+  canRerun: boolean;
+}) {
   const allBanners = [...result.homepageBanners, ...result.promoBanners];
   return (
     <div className={`card overflow-hidden ${result.success ? '' : 'border-red-900/50'}`}>
@@ -308,6 +405,15 @@ function ResultCard({ result }: { result: ScrapeResult }) {
               {allBanners.length} banner{allBanners.length !== 1 ? 's' : ''}
             </span>
           )}
+          {/* Rerun button */}
+          <button
+            onClick={() => onRerun(result.url)}
+            disabled={!canRerun}
+            title="Re-scrape this site"
+            className="text-[11px] text-slate-400 hover:text-amber-400 border border-border hover:border-amber-800/60 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            ↺ Rerun
+          </button>
         </div>
       </div>
 
@@ -315,7 +421,12 @@ function ResultCard({ result }: { result: ScrapeResult }) {
       {allBanners.length > 0 ? (
         <div className="p-3 bg-surface/50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           {allBanners.map((b, i) => (
-            <BannerCard key={`${b.src}-${i}`} banner={b} domain={result.domain} />
+            <BannerCard
+              key={`${b.src}-${i}`}
+              banner={b}
+              domain={result.domain}
+              onOpenLightbox={() => onOpenLightbox(b, result.domain)}
+            />
           ))}
         </div>
       ) : result.success ? (
@@ -328,9 +439,16 @@ function ResultCard({ result }: { result: ScrapeResult }) {
 }
 
 function SiteMemoryTable({ memory, onUpdate }: { memory: SiteMemory; onUpdate: () => void }) {
-  const entries = Object.entries(memory).sort(
-    (a, b) => new Date(b[1].lastScraped).getTime() - new Date(a[1].lastScraped).getTime()
-  );
+  const [filter, setFilter] = useState('');
+
+  const entries = useMemo(() => {
+    const all = Object.entries(memory).sort(
+      (a, b) => new Date(b[1].lastScraped).getTime() - new Date(a[1].lastScraped).getTime()
+    );
+    if (!filter) return all;
+    const q = filter.toLowerCase();
+    return all.filter(([domain]) => domain.toLowerCase().includes(q));
+  }, [memory, filter]);
 
   const handleGeoChange = async (domain: string, geo: string) => {
     await fetch(`${BACKEND}/sites/${encodeURIComponent(domain)}`, {
@@ -346,7 +464,7 @@ function SiteMemoryTable({ memory, onUpdate }: { memory: SiteMemory; onUpdate: (
     onUpdate();
   };
 
-  if (entries.length === 0) {
+  if (Object.keys(memory).length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-10 text-slate-600">
         <span className="text-2xl opacity-30">◫</span>
@@ -356,54 +474,67 @@ function SiteMemoryTable({ memory, onUpdate }: { memory: SiteMemory; onUpdate: (
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="text-left border-b border-border">
-            <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Domain</th>
-            <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Tier</th>
-            <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Geo</th>
-            <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Last Scraped</th>
-            <th className="pb-3 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {entries.map(([domain, entry]) => (
-            <tr key={domain} className="group hover:bg-surface-2/50 transition-colors">
-              <td className="py-3 pr-6 font-medium text-slate-200">{domain}</td>
-              <td className="py-3 pr-6">
-                <TierBadge tier={entry.lastSuccessfulTier} />
-              </td>
-              <td className="py-3 pr-6">
-                <select
-                  value={entry.workingGeo ?? ''}
-                  onChange={e => handleGeoChange(domain, e.target.value)}
-                  className="bg-surface-3 border border-border hover:border-border-2 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent transition-colors cursor-pointer"
-                >
-                  {GEO_OPTIONS.map(o => (
-                    <option key={o.value} value={o.value}>
-                      {o.value ? `${o.flag} ${o.value.toUpperCase()}` : '🌍 Auto'}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td className="py-3 pr-6 text-slate-500 text-xs font-mono">
-                {new Date(entry.lastScraped).toLocaleDateString()}&nbsp;
-                {new Date(entry.lastScraped).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </td>
-              <td className="py-3">
-                <button
-                  onClick={() => handleDelete(domain)}
-                  title="Reset cached tier/geo — runs full re-detection on next scrape"
-                  className="text-xs text-red-500/70 hover:text-red-400 border border-red-900/40 hover:border-red-800 px-2.5 py-1 rounded-lg transition-colors"
-                >
-                  Reset
-                </button>
-              </td>
+    <div className="space-y-3">
+      {/* Search filter */}
+      <input
+        type="text"
+        value={filter}
+        onChange={e => setFilter(e.target.value)}
+        placeholder="Filter by domain…"
+        className="w-full sm:w-64 bg-surface-3 border border-border hover:border-border-2 focus:border-accent rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none transition-colors"
+      />
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="text-left border-b border-border">
+              <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Domain</th>
+              <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Tier</th>
+              <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Geo</th>
+              <th className="pb-3 pr-6 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Last Scraped</th>
+              <th className="pb-3 text-[11px] font-semibold tracking-widest uppercase text-slate-600">Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {entries.map(([domain, entry]) => (
+              <tr key={domain} className="group hover:bg-surface-2/50 transition-colors">
+                <td className="py-3 pr-6 font-medium text-slate-200">{domain}</td>
+                <td className="py-3 pr-6">
+                  <TierBadge tier={entry.lastSuccessfulTier} />
+                </td>
+                <td className="py-3 pr-6">
+                  <select
+                    value={entry.workingGeo ?? ''}
+                    onChange={e => handleGeoChange(domain, e.target.value)}
+                    className="bg-surface-3 border border-border hover:border-border-2 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent transition-colors cursor-pointer"
+                  >
+                    {GEO_OPTIONS.map(o => (
+                      <option key={o.value} value={o.value}>
+                        {o.value ? `${o.flag} ${o.value.toUpperCase()}` : '🌍 Auto'}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="py-3 pr-6 text-slate-500 text-xs font-mono">
+                  {new Date(entry.lastScraped).toLocaleDateString()}&nbsp;
+                  {new Date(entry.lastScraped).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </td>
+                <td className="py-3">
+                  <button
+                    onClick={() => handleDelete(domain)}
+                    title="Reset cached tier/geo — runs full re-detection on next scrape"
+                    className="text-xs text-red-500/70 hover:text-red-400 border border-red-900/40 hover:border-red-800 px-2.5 py-1 rounded-lg transition-colors"
+                  >
+                    Reset
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {entries.length === 0 && filter && (
+          <p className="text-center text-slate-600 text-sm py-6">No sites match &quot;{filter}&quot;</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -419,6 +550,9 @@ export default function Home() {
   const [siteMemory, setSiteMemory]       = useState<SiteMemory>({});
   const [showMemory, setShowMemory]       = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
+  const [lightbox, setLightbox]           = useState<{ banner: BannerImage; domain: string } | null>(null);
+  const [logExpanded, setLogExpanded]     = useState(false);
+  const [logCopied, setLogCopied]         = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const checkBackend = useCallback(async () => {
@@ -448,8 +582,17 @@ export default function Home() {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logEvents]);
 
-  const handleScrape = useCallback(() => {
-    const urls = urlsText.split('\n').map(u => u.trim()).filter(Boolean);
+  // URL validation
+  const urlLines = useMemo(
+    () => urlsText.split('\n').map(u => u.trim()).filter(Boolean),
+    [urlsText]
+  );
+  const invalidUrls = useMemo(
+    () => urlLines.filter(u => !isValidUrl(u)),
+    [urlLines]
+  );
+
+  const startScrape = useCallback((urls: string[]) => {
     if (urls.length === 0 || scraping) return;
 
     setScraping(true);
@@ -489,7 +632,16 @@ export default function Home() {
       }
 
       if (event.type === 'site_done' && event.result) {
-        setResults(prev => [...prev, event.result!]);
+        setResults(prev => {
+          // Replace if already exists (rerun), otherwise append
+          const exists = prev.findIndex(r => r.domain === event.result!.domain);
+          if (exists >= 0) {
+            const updated = [...prev];
+            updated[exists] = event.result!;
+            return updated;
+          }
+          return [...prev, event.result!];
+        });
       }
 
       if (event.type === 'done' || event.type === 'error') {
@@ -507,13 +659,66 @@ export default function Home() {
         message: 'Connection lost — is the backend running on port 3001?',
       }]);
     };
-  }, [urlsText, geo, scraping, loadMemory]);
+  }, [geo, scraping, loadMemory]);
 
-  const urlCount = urlsText.split('\n').filter(l => l.trim()).length;
+  const handleScrape = useCallback(() => {
+    if (invalidUrls.length > 0) return;
+    startScrape(urlLines);
+  }, [urlLines, invalidUrls, startScrape]);
+
+  const handleRerun = useCallback((url: string) => {
+    startScrape([url]);
+  }, [startScrape]);
+
+  const handleOpenLightbox = useCallback((banner: BannerImage, domain: string) => {
+    setLightbox({ banner, domain });
+  }, []);
+
+  const handleCloseLightbox = useCallback(() => {
+    setLightbox(null);
+  }, []);
+
+  const exportResults = useCallback(() => {
+    const data = JSON.stringify(results, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bannerbot-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [results]);
+
+  const copyLog = useCallback(() => {
+    const text = logEvents.map(ev => formatLogEvent(ev)).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setLogCopied(true);
+      setTimeout(() => setLogCopied(false), 2000);
+    });
+  }, [logEvents]);
+
+  const urlCount = urlLines.length;
   const isActive = scraping || logEvents.length > 0;
+
+  // Stats
+  const successCount  = results.filter(r => r.success).length;
+  const totalBanners  = results.reduce((s, r) => s + r.homepageBanners.length + r.promoBanners.length, 0);
+  const tierNums      = results.filter(r => r.success && r.tier > 0).map(r => r.tier);
+  const avgTier       = tierNums.length > 0
+    ? (tierNums.reduce((a, b) => a + b, 0) / tierNums.length).toFixed(1)
+    : '—';
 
   return (
     <main className="relative min-h-screen text-slate-100 py-8 px-4 sm:px-6 lg:px-10">
+      {/* Lightbox */}
+      {lightbox && (
+        <LightboxModal
+          banner={lightbox.banner}
+          domain={lightbox.domain}
+          onClose={handleCloseLightbox}
+        />
+      )}
+
       <div className="relative z-10 max-w-6xl mx-auto space-y-6">
 
         {/* ── Header ────────────────────────────────────────────────────────── */}
@@ -533,7 +738,7 @@ export default function Home() {
           <div className="flex items-center gap-4">
             <BackendStatus connected={backendOnline} />
             <span className="hidden sm:block text-[10px] font-mono text-border-2 border border-border px-2 py-1 rounded-md">
-              v2.0
+              v2.1
             </span>
           </div>
         </header>
@@ -548,14 +753,26 @@ export default function Home() {
           </div>
 
           {/* URL textarea */}
-          <textarea
-            value={urlsText}
-            onChange={e => setUrlsText(e.target.value)}
-            placeholder={"https://www.bet365.com\nhttps://www.casumo.com\nhttps://www.novadreams.com"}
-            rows={5}
-            disabled={scraping}
-            className="w-full bg-surface-3 border border-border hover:border-border-2 focus:border-accent rounded-xl p-4 text-sm font-mono text-slate-100 placeholder-slate-700 focus:outline-none transition-colors resize-y disabled:opacity-50 leading-relaxed"
-          />
+          <div className="space-y-1.5">
+            <textarea
+              value={urlsText}
+              onChange={e => setUrlsText(e.target.value)}
+              placeholder={"https://www.bet365.com\nhttps://www.casumo.com\nhttps://www.novadreams.com"}
+              rows={5}
+              disabled={scraping}
+              className={`w-full bg-surface-3 border ${invalidUrls.length > 0 ? 'border-red-700/60' : 'border-border hover:border-border-2'} focus:border-accent rounded-xl p-4 text-sm font-mono text-slate-100 placeholder-slate-700 focus:outline-none transition-colors resize-y disabled:opacity-50 leading-relaxed`}
+            />
+            {invalidUrls.length > 0 && (
+              <div className="flex items-start gap-1.5 text-[11px] text-red-400">
+                <span className="flex-shrink-0 mt-0.5">⚠</span>
+                <span>
+                  {invalidUrls.length} invalid URL{invalidUrls.length > 1 ? 's' : ''}:&nbsp;
+                  <span className="font-mono">{invalidUrls.slice(0, 2).join(', ')}{invalidUrls.length > 2 ? ` +${invalidUrls.length - 2} more` : ''}</span>
+                  &nbsp;— must include https://
+                </span>
+              </div>
+            )}
+          </div>
 
           {/* Controls row */}
           <div className="flex flex-wrap items-center gap-3">
@@ -593,7 +810,7 @@ export default function Home() {
             {/* Scrape button */}
             <button
               onClick={handleScrape}
-              disabled={scraping || urlCount === 0 || !backendOnline}
+              disabled={scraping || urlCount === 0 || !backendOnline || invalidUrls.length > 0}
               className="btn-primary ml-auto flex items-center gap-2.5 text-sm"
             >
               {scraping ? (
@@ -654,8 +871,24 @@ export default function Home() {
 
               {/* Terminal log */}
               <div className="p-4">
-                <div className="section-label mb-3">Terminal</div>
-                <div className="terminal h-52 overflow-y-auto p-3 space-y-0.5">
+                <div className="flex items-center mb-3">
+                  <div className="section-label">Terminal</div>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <button
+                      onClick={copyLog}
+                      className="text-[11px] text-slate-600 hover:text-slate-300 border border-border hover:border-border-2 px-2 py-0.5 rounded-md transition-colors"
+                    >
+                      {logCopied ? '✓ Copied' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={() => setLogExpanded(v => !v)}
+                      className="text-[11px] text-slate-600 hover:text-slate-300 border border-border hover:border-border-2 px-2 py-0.5 rounded-md transition-colors"
+                    >
+                      {logExpanded ? '⊟ Collapse' : '⊞ Expand'}
+                    </button>
+                  </div>
+                </div>
+                <div className={`terminal overflow-y-auto p-3 space-y-0.5 transition-all duration-300 ${logExpanded ? 'h-auto max-h-[600px]' : 'h-52'}`}>
                   {logEvents.map((ev, i) => (
                     <div key={i} className={`log-entry flex gap-2 items-baseline ${logLineColor(ev.type)}`}>
                       <span className="flex-shrink-0 w-3 text-center">{logLinePrefix(ev.type)}</span>
@@ -672,14 +905,38 @@ export default function Home() {
         {/* ── Results ───────────────────────────────────────────────────────── */}
         {results.length > 0 && (
           <section className="space-y-4">
-            <div className="section-label">
-              <span className="step-num">Results</span>
-              <span className="text-slate-600 font-normal normal-case tracking-normal text-xs ml-1">
-                {results.filter(r => r.success).length} of {results.length} succeeded
-              </span>
+            {/* Header + stats */}
+            <div className="flex items-center gap-3">
+              <div className="section-label">
+                <span className="step-num">Results</span>
+                <span className="text-slate-600 font-normal normal-case tracking-normal text-xs ml-1">
+                  {successCount} of {results.length} succeeded
+                </span>
+              </div>
+              <div className="flex items-center gap-3 ml-auto">
+                {/* Stats chips */}
+                <span className="text-[11px] text-slate-500 hidden sm:flex items-center gap-3">
+                  <span className="text-emerald-400/80">{totalBanners} banners</span>
+                  <span>avg tier {avgTier}</span>
+                </span>
+                {/* Export */}
+                <button
+                  onClick={exportResults}
+                  className="text-[11px] text-slate-400 hover:text-slate-200 border border-border hover:border-border-2 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
+                >
+                  ↓ Export JSON
+                </button>
+              </div>
             </div>
+
             {results.map(r => (
-              <ResultCard key={r.domain} result={r} />
+              <ResultCard
+                key={r.domain}
+                result={r}
+                onRerun={handleRerun}
+                onOpenLightbox={handleOpenLightbox}
+                canRerun={!scraping}
+              />
             ))}
           </section>
         )}

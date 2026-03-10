@@ -67,14 +67,19 @@ export async function findPromotionsUrl(page: Page, baseUrl: string): Promise<st
     }
   }
 
-  // 2. Try common path guesses via HEAD request
+  // 2. Try common path guesses — fire all HEAD requests concurrently, return first 200
   const origin = new URL(currentUrl).origin;
-  for (const path of PROMO_PATH_GUESSES) {
-    const candidate = `${origin}${path}`;
+  const checkPath = async (p: string): Promise<string | null> => {
+    const candidate = `${origin}${p}`;
     try {
-      const res = await page.request.head(candidate, { timeout: 10_000 });
-      if (res.ok()) return candidate;
-    } catch { /* not found */ }
+      const res = await page.request.head(candidate, { timeout: 8_000 });
+      return res.ok() ? candidate : null;
+    } catch { return null; }
+  };
+
+  const headResults = await Promise.allSettled(PROMO_PATH_GUESSES.map(checkPath));
+  for (const r of headResults) {
+    if (r.status === 'fulfilled' && r.value) return r.value;
   }
 
   return null;
