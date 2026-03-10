@@ -3,12 +3,10 @@
  *
  * Folder structure created automatically:
  *   {ROOT_FOLDER}/
- *   └── bet365.com/
- *       ├── 2026-03-10_14-22/   ← one folder per scrape run
- *       │   ├── hp_banner_01.webp
- *       │   ├── hp_banner_02.jpg
- *       │   └── pr_banner_01.jpg
- *       └── 2026-03-11_09-05/
+ *   └── bet365.com/          ← one folder per domain, images accumulate here
+ *       ├── hp_01.webp
+ *       ├── hp_02.jpg
+ *       └── pr_01.jpg
  *
  * Auth: Service Account JSON stored in GOOGLE_SERVICE_ACCOUNT_KEY env var
  *       (base64-encoded). The service account email must have Editor access
@@ -107,12 +105,16 @@ export async function uploadBannersToDrive(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const drive = google.drive({ version: 'v3', auth: auth as any });
 
-    // Timestamp: 2026-03-10_14-22
-    const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
-
-    // Create nested folder: ROOT/domain/timestamp
+    // Upload directly into ROOT/domain/ (no timestamp subfolder — images accumulate)
     const domainFolderId = await ensureFolder(drive, domain, rootFolderId);
-    const runFolderId    = await ensureFolder(drive, ts, domainFolderId);
+
+    // Count existing files to avoid overwriting previous banners
+    const existingRes = await drive.files.list({
+      q: `'${domainFolderId}' in parents and trashed=false`,
+      fields: 'files(name)',
+      spaces: 'drive',
+    });
+    const existingNames = new Set((existingRes.data.files ?? []).map(f => f.name ?? ''));
 
     // Upload each banner (track page type for prefix)
     const hpCount: Record<string, number> = {};
@@ -128,14 +130,20 @@ export async function uploadBannersToDrive(
       const counter = isPromo ? prCount : hpCount;
       const prefix  = isPromo ? 'pr' : 'hp';
       counter[prefix] = (counter[prefix] ?? 0) + 1;
-      const idx      = String(counter[prefix]).padStart(2, '0');
       const ext      = path.extname(banner.localPath) || '.jpg';
-      const filename = `${prefix}_${idx}${ext}`;
+      // Find a filename that doesn't already exist in the folder
+      let idx = counter[prefix]!;
+      let filename = `${prefix}_${String(idx).padStart(2, '0')}${ext}`;
+      while (existingNames.has(filename)) {
+        idx++;
+        filename = `${prefix}_${String(idx).padStart(2, '0')}${ext}`;
+      }
+      existingNames.add(filename); // reserve for this run
 
       await drive.files.create({
         requestBody: {
           name:    filename,
-          parents: [runFolderId],
+          parents: [domainFolderId],
         },
         media: {
           mimeType: getMimeType(banner.localPath),
@@ -146,9 +154,9 @@ export async function uploadBannersToDrive(
       console.log(`  ☁ Drive: uploaded ${filename}`);
     }
 
-    const folderUrl = `https://drive.google.com/drive/folders/${runFolderId}`;
+    const folderUrl = `https://drive.google.com/drive/folders/${domainFolderId}`;
     console.log(`  ☁ Drive folder: ${folderUrl}`);
-    return { folderId: runFolderId, folderUrl };
+    return { folderId: domainFolderId, folderUrl };
   } catch (err) {
     console.warn(`  ⚠ Google Drive upload error: ${(err as Error).message}`);
     return null;
