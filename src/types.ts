@@ -42,6 +42,9 @@ export interface ScrapeResult {
   success: boolean;
   error?: string;
   scrapedAt: string;
+  // Google Drive folder created for this scrape run
+  driveFolderId?: string;
+  driveFolderUrl?: string;
 }
 
 export interface SiteMemoryEntry {

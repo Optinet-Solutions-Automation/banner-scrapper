@@ -48,6 +48,8 @@ interface ScrapeResult {
   success: boolean;
   error?: string;
   scrapedAt: string;
+  driveFolderId?: string;
+  driveFolderUrl?: string;
 }
 
 interface ProgressEvent {
@@ -79,6 +81,13 @@ interface SiteStatus {
   currentGeo?: string;
   message?: string;
   result?: ScrapeResult;
+}
+
+interface PromptItem {
+  imageUrl?: string;
+  bannerSrc?: string;
+  prompt: string;
+  page?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -373,13 +382,112 @@ function BannerCard({
   );
 }
 
+function PromptsPanel({
+  domain,
+  prompts,
+  approvalState,
+  onApprove,
+}: {
+  domain: string;
+  prompts: PromptItem[];
+  approvalState: Record<string, 'approved' | 'rejected'>;
+  onApprove: (domain: string, item: PromptItem, idx: number, approved: boolean) => void;
+}) {
+  const [copied, setCopied] = useState<number | null>(null);
+
+  const copyPrompt = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(idx);
+      setTimeout(() => setCopied(null), 1800);
+    });
+  };
+
+  return (
+    <div className="border-t border-border bg-[#040810]/60 p-4 space-y-3">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="section-label text-[10px]">AI Prompts</span>
+        <span className="text-[11px] text-slate-600">{prompts.length} generated</span>
+      </div>
+
+      {prompts.map((item, i) => {
+        const key = `${domain}::${i}`;
+        const status = approvalState[key];
+        const displayUrl = item.imageUrl || item.bannerSrc;
+
+        return (
+          <div
+            key={i}
+            className={`rounded-xl border p-4 space-y-3 transition-colors ${
+              status === 'approved'
+                ? 'border-emerald-700/60 bg-emerald-950/20'
+                : status === 'rejected'
+                ? 'border-red-900/40 bg-red-950/10 opacity-60'
+                : 'border-border bg-surface-2'
+            }`}
+          >
+            {/* Mini banner thumbnail */}
+            {displayUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={displayUrl}
+                alt=""
+                className="w-full max-h-20 object-cover rounded-lg opacity-75"
+              />
+            )}
+
+            {/* Prompt text */}
+            <p className="text-[12px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap">
+              {item.prompt}
+            </p>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => onApprove(domain, item, i, true)}
+                className={`text-[11px] px-3 py-1.5 rounded-lg border font-medium transition-colors ${
+                  status === 'approved'
+                    ? 'bg-emerald-900/60 border-emerald-700 text-emerald-300'
+                    : 'border-border hover:border-emerald-700/70 hover:text-emerald-400 text-slate-400'
+                }`}
+              >
+                {status === 'approved' ? '✓ Approved' : 'Approve'}
+              </button>
+              <button
+                onClick={() => onApprove(domain, item, i, false)}
+                className={`text-[11px] px-3 py-1.5 rounded-lg border font-medium transition-colors ${
+                  status === 'rejected'
+                    ? 'bg-red-900/60 border-red-700 text-red-300'
+                    : 'border-border hover:border-red-800/70 hover:text-red-400 text-slate-400'
+                }`}
+              >
+                {status === 'rejected' ? '✗ Rejected' : 'Not Approved'}
+              </button>
+              <button
+                onClick={() => copyPrompt(item.prompt, i)}
+                className="ml-auto text-[11px] text-slate-600 hover:text-slate-300 border border-border hover:border-border-2 px-2.5 py-1.5 rounded-lg transition-colors"
+              >
+                {copied === i ? '✓ Copied' : '⎘ Copy'}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ResultCard({
   result, onRerun, onOpenLightbox, canRerun,
+  prompts, approvalState, onApprove, promptsLoading,
 }: {
   result: ScrapeResult;
   onRerun: (url: string) => void;
   onOpenLightbox: (banner: BannerImage, domain: string) => void;
   canRerun: boolean;
+  prompts: PromptItem[] | null;
+  approvalState: Record<string, 'approved' | 'rejected'>;
+  onApprove: (domain: string, item: PromptItem, idx: number, approved: boolean) => void;
+  promptsLoading: boolean;
 }) {
   const allBanners = [...result.homepageBanners, ...result.promoBanners];
   return (
@@ -393,7 +501,7 @@ function ResultCard({
           <div className="font-semibold text-slate-100 tracking-tight">{result.domain}</div>
           <div className="text-[11px] text-slate-500 font-mono truncate">{result.url}</div>
         </div>
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
           {result.success && <TierBadge tier={result.tier} />}
           {result.geo && (
             <span className="text-sm" title={result.geo.toUpperCase()}>
@@ -403,6 +511,24 @@ function ResultCard({
           {result.success && allBanners.length > 0 && (
             <span className="text-xs text-slate-400 bg-surface-3 px-2 py-0.5 rounded-full border border-border">
               {allBanners.length} banner{allBanners.length !== 1 ? 's' : ''}
+            </span>
+          )}
+          {/* Drive folder link */}
+          {result.driveFolderUrl && (
+            <a
+              href={result.driveFolderUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open Drive folder"
+              className="text-[11px] text-slate-500 hover:text-emerald-400 border border-border hover:border-emerald-800/60 px-2.5 py-1 rounded-lg transition-colors"
+            >
+              ☁ Drive
+            </a>
+          )}
+          {/* Prompts loading indicator */}
+          {promptsLoading && (
+            <span className="text-[11px] text-accent flex items-center gap-1">
+              <span className="spin text-[10px]">⟳</span> Analyzing…
             </span>
           )}
           {/* Rerun button */}
@@ -433,6 +559,21 @@ function ResultCard({
         <div className="px-5 py-4 text-slate-600 text-sm">No banners detected on this site.</div>
       ) : (
         <div className="px-5 py-4 text-red-400/80 text-sm leading-relaxed">{result.error}</div>
+      )}
+
+      {/* Prompts panel */}
+      {prompts && prompts.length > 0 && (
+        <PromptsPanel
+          domain={result.domain}
+          prompts={prompts}
+          approvalState={approvalState}
+          onApprove={onApprove}
+        />
+      )}
+      {prompts && prompts.length === 0 && (
+        <div className="border-t border-border px-5 py-4 text-slate-600 text-xs">
+          n8n returned no prompts. Check your workflow configuration.
+        </div>
       )}
     </div>
   );
@@ -554,6 +695,11 @@ export default function Home() {
   const [logExpanded, setLogExpanded]     = useState(false);
   const [logCopied, setLogCopied]         = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  // Prompts state
+  const [promptsByDomain, setPromptsByDomain]   = useState<Record<string, PromptItem[]>>({});
+  const [generatingPrompts, setGeneratingPrompts] = useState(false);
+  const [approvalState, setApprovalState]         = useState<Record<string, 'approved' | 'rejected'>>({});
 
   const checkBackend = useCallback(async () => {
     try {
@@ -696,6 +842,106 @@ export default function Home() {
       setTimeout(() => setLogCopied(false), 2000);
     });
   }, [logEvents]);
+
+  // Single webhook call with ALL sites → n8n processes all Drive folders → returns per-site prompts
+  const handleGenerateAllPrompts = useCallback(async () => {
+    const targets = results.filter(r => r.success);
+    if (targets.length === 0) return;
+
+    // Warn if any site has no Drive folder ID
+    const missing = targets.filter(r => !r.driveFolderId).map(r => r.domain);
+    if (missing.length === targets.length) {
+      // None have Drive configured — show message on each card
+      const fallback: Record<string, PromptItem[]> = {};
+      for (const r of targets) {
+        fallback[r.domain] = [{ prompt: 'Drive folder not found — enable GOOGLE_DRIVE_ROOT_FOLDER_ID + GOOGLE_SERVICE_ACCOUNT_KEY and re-scrape.' }];
+      }
+      setPromptsByDomain(prev => ({ ...prev, ...fallback }));
+      return;
+    }
+
+    setGeneratingPrompts(true);
+
+    const payload = {
+      sites: targets.map(r => ({
+        domain:         r.domain,
+        driveFolderId:  r.driveFolderId ?? null,
+        driveFolderUrl: r.driveFolderUrl ?? null,
+      })),
+    };
+
+    try {
+      const res = await fetch(`${BACKEND}/analyze-prompts`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+        signal:  AbortSignal.timeout(300_000),
+      });
+      const data = await res.json();
+
+      // Parse n8n response — handles several common shapes:
+      //   [{ domain, prompts: [...] }]          ← preferred: array of site objects
+      //   { sites: [{ domain, prompts }] }      ← wrapped
+      //   { domain: "x", prompts: [...] }       ← single site
+      //   [{ prompt: "...", imageUrl: "..." }]   ← flat prompt list (assign to first site)
+      //   "string"                              ← plain text (assign to first site)
+      const byDomain: Record<string, PromptItem[]> = {};
+
+      const toItems = (raw: unknown): PromptItem[] => {
+        if (Array.isArray(raw)) return raw as PromptItem[];
+        if (typeof raw === 'string') return [{ prompt: raw }];
+        if (raw && typeof raw === 'object') {
+          const o = raw as Record<string, unknown>;
+          if (typeof o.prompt === 'string') return [{ prompt: o.prompt }];
+          if (typeof o.output === 'string') return [{ prompt: o.output }];
+          if (typeof o.text === 'string')   return [{ prompt: o.text }];
+          return [{ prompt: JSON.stringify(raw, null, 2) }];
+        }
+        return [{ prompt: String(raw) }];
+      };
+
+      const siteList: Array<{ domain: string; prompts: unknown }> | null =
+        Array.isArray(data) && data.length > 0 && 'domain' in data[0] ? data :
+        Array.isArray(data?.sites) ? data.sites :
+        data?.domain ? [data] :
+        null;
+
+      if (siteList) {
+        for (const entry of siteList) {
+          byDomain[entry.domain] = toItems(entry.prompts);
+        }
+      } else {
+        // Flat response — assign to all targets (they all share the same analysis)
+        const items = toItems(data);
+        for (const r of targets) byDomain[r.domain] = items;
+      }
+
+      setPromptsByDomain(prev => ({ ...prev, ...byDomain }));
+    } catch (err) {
+      const errItem: PromptItem[] = [{ prompt: `Error: ${(err as Error).message}` }];
+      const errMap: Record<string, PromptItem[]> = {};
+      for (const r of targets) errMap[r.domain] = errItem;
+      setPromptsByDomain(prev => ({ ...prev, ...errMap }));
+    } finally {
+      setGeneratingPrompts(false);
+    }
+  }, [results]);
+
+  const handleApprovePrompt = useCallback(async (
+    domain: string,
+    item: PromptItem,
+    idx: number,
+    approved: boolean,
+  ) => {
+    const key = `${domain}::${idx}`;
+    setApprovalState(prev => ({ ...prev, [key]: approved ? 'approved' : 'rejected' }));
+
+    await fetch(`${BACKEND}/approve-prompt`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ domain, prompt: item.prompt, imageUrl: item.imageUrl, approved }),
+    }).catch(() => { /* non-critical */ });
+  }, []);
 
   const urlCount = urlLines.length;
   const isActive = scraping || logEvents.length > 0;
@@ -913,12 +1159,25 @@ export default function Home() {
                   {successCount} of {results.length} succeeded
                 </span>
               </div>
-              <div className="flex items-center gap-3 ml-auto">
+              <div className="flex items-center gap-2 ml-auto flex-wrap justify-end">
                 {/* Stats chips */}
-                <span className="text-[11px] text-slate-500 hidden sm:flex items-center gap-3">
+                <span className="text-[11px] text-slate-500 hidden sm:flex items-center gap-3 mr-1">
                   <span className="text-emerald-400/80">{totalBanners} banners</span>
                   <span>avg tier {avgTier}</span>
                 </span>
+                {/* Generate Prompts — single call for all sites */}
+                {results.some(r => r.success) && (
+                  <button
+                    onClick={handleGenerateAllPrompts}
+                    disabled={generatingPrompts}
+                    className="text-[11px] text-slate-200 hover:text-accent border border-border hover:border-accent/60 px-3 py-1 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    {generatingPrompts
+                      ? <><span className="spin text-[10px]">⟳</span> Analyzing…</>
+                      : <><span>✦</span> Generate Prompts</>
+                    }
+                  </button>
+                )}
                 {/* Export */}
                 <button
                   onClick={exportResults}
@@ -936,6 +1195,10 @@ export default function Home() {
                 onRerun={handleRerun}
                 onOpenLightbox={handleOpenLightbox}
                 canRerun={!scraping}
+                promptsLoading={generatingPrompts}
+                prompts={promptsByDomain[r.domain] ?? null}
+                approvalState={approvalState}
+                onApprove={handleApprovePrompt}
               />
             ))}
           </section>

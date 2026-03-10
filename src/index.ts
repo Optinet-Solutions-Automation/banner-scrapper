@@ -15,6 +15,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
+import * as https from 'https';
 import { runScraper } from './orchestrator';
 import { config } from './config';
 import { progressEmitter, ProgressEvent } from './progress-emitter';
@@ -240,6 +241,73 @@ function startHttpServer(port: number) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not found' }));
       }
+      return;
+    }
+
+    // ── POST /analyze-prompts — proxy to n8n, returns prompts from Claude Vision ──
+    if (req.method === 'POST' && rawUrl === '/analyze-prompts') {
+      const n8nUrl = config.n8nWebhookUrl;
+      if (!n8nUrl) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'N8N_WEBHOOK_URL not configured' }));
+        return;
+      }
+      const body = await readBody(req);
+      try {
+        const parsed = new URL(n8nUrl);
+        const lib = parsed.protocol === 'https:' ? https : http;
+        const n8nResponseText = await new Promise<string>((resolve, reject) => {
+          const n8nReq = lib.request(n8nUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type':   'application/json',
+              'Content-Length': Buffer.byteLength(body),
+            },
+          }, (r) => {
+            let data = '';
+            r.on('data', c => data += c);
+            r.on('end', () => resolve(data));
+          });
+          n8nReq.setTimeout(180_000, () => {
+            n8nReq.destroy(new Error('n8n request timed out after 180s'));
+          });
+          n8nReq.on('error', reject);
+          n8nReq.write(body);
+          n8nReq.end();
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(n8nResponseText);
+      } catch (err) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `n8n request failed: ${(err as Error).message}` }));
+      }
+      return;
+    }
+
+    // ── POST /approve-prompt — records approval; forwards to Airtable webhook when configured ──
+    if (req.method === 'POST' && rawUrl === '/approve-prompt') {
+      const body = await readBody(req);
+      const airtableUrl = process.env.AIRTABLE_WEBHOOK_URL;
+      if (airtableUrl) {
+        try {
+          const parsed = new URL(airtableUrl);
+          const lib = parsed.protocol === 'https:' ? https : http;
+          await new Promise<void>((resolve) => {
+            const r = lib.request(airtableUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type':   'application/json',
+                'Content-Length': Buffer.byteLength(body),
+              },
+            }, (rr) => { rr.resume(); rr.on('end', resolve); });
+            r.on('error', () => resolve());
+            r.write(body);
+            r.end();
+          });
+        } catch { /* Airtable webhook is optional — swallow errors */ }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
       return;
     }
 

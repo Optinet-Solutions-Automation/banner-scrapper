@@ -176,6 +176,11 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
   if (hasDrive && result.success) {
     const { uploadBannersToDrive } = await import('./drive-uploader');
     driveResult = await uploadBannersToDrive(allBanners, result.domain);
+    if (driveResult) {
+      // Attach to result so it flows through SSE → UI
+      result.driveFolderId  = driveResult.folderId;
+      result.driveFolderUrl = driveResult.folderUrl;
+    }
   }
 
   // ── WhatsApp notification ────────────────────────────────────────────────
