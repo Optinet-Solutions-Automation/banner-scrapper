@@ -15,7 +15,12 @@
 import { google, drive_v3 } from 'googleapis';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { BannerImage } from './types';
+
+function md5(filePath: string): string {
+  return crypto.createHash('md5').update(fs.readFileSync(filePath)).digest('hex');
+}
 
 function getMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
@@ -108,29 +113,40 @@ export async function uploadBannersToDrive(
     // Upload directly into ROOT/domain/ (no timestamp subfolder — images accumulate)
     const domainFolderId = await ensureFolder(drive, domain, rootFolderId);
 
-    // Count existing files to avoid overwriting previous banners
+    // Fetch existing files (name + description used to store hash)
     const existingRes = await drive.files.list({
       q: `'${domainFolderId}' in parents and trashed=false`,
-      fields: 'files(name)',
+      fields: 'files(name,description)',
       spaces: 'drive',
     });
-    const existingNames = new Set((existingRes.data.files ?? []).map(f => f.name ?? ''));
+    const existingFiles = existingRes.data.files ?? [];
+    const existingNames = new Set(existingFiles.map(f => f.name ?? ''));
+    // description stores the md5 hash so we can skip identical images
+    const existingHashes = new Set(existingFiles.map(f => f.description ?? '').filter(Boolean));
 
-    // Upload each banner (track page type for prefix)
+    // Deduplicate the incoming batch by hash first
+    const seenHashes = new Set<string>();
+    const uniqueBanners = banners.filter(b => {
+      if (!b.localPath || !fs.existsSync(b.localPath)) return false;
+      const hash = md5(b.localPath);
+      if (seenHashes.has(hash) || existingHashes.has(hash)) {
+        console.log(`  ⟳ Drive: skipping duplicate — ${path.basename(b.localPath)}`);
+        return false;
+      }
+      seenHashes.add(hash);
+      return true;
+    });
+
+    // Upload each unique banner
     const hpCount: Record<string, number> = {};
     const prCount: Record<string, number> = {};
 
-    for (const banner of banners) {
-      if (!banner.localPath || !fs.existsSync(banner.localPath)) {
-        console.warn(`  ⚠ Drive: file not found — ${banner.localPath}`);
-        continue;
-      }
-
+    for (const banner of uniqueBanners) {
       const isPromo = banner.page === 'promotions';
       const counter = isPromo ? prCount : hpCount;
       const prefix  = isPromo ? 'pr' : 'hp';
       counter[prefix] = (counter[prefix] ?? 0) + 1;
-      const ext      = path.extname(banner.localPath) || '.jpg';
+      const ext      = path.extname(banner.localPath!) || '.jpg';
       // Find a filename that doesn't already exist in the folder
       let idx = counter[prefix]!;
       let filename = `${prefix}_${String(idx).padStart(2, '0')}${ext}`;
@@ -138,21 +154,26 @@ export async function uploadBannersToDrive(
         idx++;
         filename = `${prefix}_${String(idx).padStart(2, '0')}${ext}`;
       }
-      existingNames.add(filename); // reserve for this run
+      existingNames.add(filename);
 
+      const hash = md5(banner.localPath!);
       await drive.files.create({
         requestBody: {
-          name:    filename,
-          parents: [domainFolderId],
+          name:        filename,
+          parents:     [domainFolderId],
+          description: hash,   // store hash so future runs can skip this image
         },
         media: {
-          mimeType: getMimeType(banner.localPath),
-          body:     fs.createReadStream(banner.localPath),
+          mimeType: getMimeType(banner.localPath!),
+          body:     fs.createReadStream(banner.localPath!),
         },
       });
 
       console.log(`  ☁ Drive: uploaded ${filename}`);
     }
+
+    const skipped = banners.length - uniqueBanners.length;
+    if (skipped > 0) console.log(`  ⟳ Drive: skipped ${skipped} duplicate(s)`);
 
     const folderUrl = `https://drive.google.com/drive/folders/${domainFolderId}`;
     console.log(`  ☁ Drive folder: ${folderUrl}`);
