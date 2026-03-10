@@ -37,6 +37,9 @@ export const config = {
 
   // Output
   n8nWebhookUrl: process.env.N8N_WEBHOOK_URL ?? '',
+  // Public URL of this backend server — used to build imageUrl fields in n8n payload
+  // so n8n can download scraped banners. Set to your Cloud Run URL in production.
+  backendUrl: (process.env.BACKEND_URL ?? 'http://localhost:3001').replace(/\/$/, ''),
 
   // Scraper behaviour
   maxTier:         parseInt(process.env.MAX_TIER         ?? '4', 10),

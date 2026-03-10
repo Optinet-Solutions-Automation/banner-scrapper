@@ -1,0 +1,246 @@
+{
+  "name": "BannerBot → Google Drive + WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bannerbot",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "BannerBot Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 320],
+      "webhookId": "bannerbot-scraper"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract payload (handles both raw body and wrapped body)\nconst d = $input.first().json.body ?? $input.first().json;\n\nconst ts = new Date(d.scrapedAt || new Date())\n  .toISOString().slice(0, 16).replace('T', '_').replace(':', '-');\n\n// Combine homepage + promo banners with a prefix label\nconst allBanners = [\n  ...(d.homepageBanners || []).map((b, i) => ({\n    ...b,\n    filePrefix: 'hp',\n    idx: i + 1,\n    ext: (b.imageUrl || b.src || '').split('?')[0].split('.').pop()?.toLowerCase() || 'jpg',\n  })),\n  ...(d.promoBanners || []).map((b, i) => ({\n    ...b,\n    filePrefix: 'pr',\n    idx: i + 1,\n    ext: (b.imageUrl || b.src || '').split('?')[0].split('.').pop()?.toLowerCase() || 'jpg',\n  })),\n];\n\nreturn [{ json: {\n  domain:     d.domain,\n  tier:       d.tier,\n  geo:        d.geo ?? '',\n  scrapedAt:  d.scrapedAt,\n  success:    d.success,\n  folderName: d.domain + '_' + ts,\n  runLabel:   d.domain + ' · T' + d.tier + (d.geo ? ' ' + d.geo.toUpperCase() : '') + ' · ' + allBanners.length + ' banners',\n  allBanners,\n  totalCount: allBanners.length,\n}}];"
+      },
+      "id": "node-prepare",
+      "name": "Prepare Run Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 320]
+    },
+    {
+      "parameters": {
+        "operation": "createFolder",
+        "name": "={{ $json.folderName }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_BANNERBOT_ROOT_FOLDER_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "node-create-folder",
+      "name": "Create Run Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [680, 320],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get folder ID from Google Drive create result\nconst folderItem = $input.first().json;\nconst prepData   = $('Prepare Run Data').first().json;\nconst folderId   = folderItem.id;\nconst folderUrl  = 'https://drive.google.com/drive/folders/' + folderId;\n\n// No banners case — return a single sentinel item\nif (!prepData.allBanners || prepData.allBanners.length === 0) {\n  return [{ json: {\n    noImages:   true,\n    domain:     prepData.domain,\n    runLabel:   prepData.runLabel,\n    tier:       prepData.tier,\n    geo:        prepData.geo,\n    totalCount: 0,\n    folderId,\n    folderUrl,\n  }}];\n}\n\n// One item per banner — each carries folderUrl for the final WhatsApp message\nreturn prepData.allBanners.map((b) => ({\n  json: {\n    imageUrl:   b.imageUrl,\n    src:        b.src,\n    width:      b.width,\n    height:     b.height,\n    page:       b.page,\n    filePrefix: b.filePrefix,\n    idx:        b.idx,\n    ext:        b.ext,\n    folderId,\n    folderUrl,\n    domain:     prepData.domain,\n    runLabel:   prepData.runLabel,\n    tier:       prepData.tier,\n    geo:        prepData.geo,\n    totalCount: prepData.totalCount,\n  },\n}));"
+      },
+      "id": "node-split",
+      "name": "Split Banners",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-no-images",
+              "leftValue": "={{ $json.noImages }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if",
+      "name": "Has Images?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 320]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.imageUrl || $json.src }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "node-download",
+      "name": "Download Banner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 220]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $json.filePrefix + '_' + String($json.idx).padStart(2, '0') + '.' + ($json.ext || 'jpg') }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.folderId }}",
+          "mode": "id"
+        },
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "node-upload",
+      "name": "Upload to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1560, 220],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "node-aggregate",
+      "name": "Collect All Uploads",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1780, 220]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "REPLACE_WITH_PHONE_NUMBER_ID",
+        "recipientPhoneNumber": "REPLACE_WITH_WHATSAPP_NUMBER_E164",
+        "textBody": "={{ '🤖 BannerBot\\n\\n✅ ' + $('Split Banners').first().json.domain + '\\n' + $('Split Banners').first().json.runLabel + '\\n\\n📁 Drive folder:\\n' + $('Split Banners').first().json.folderUrl }}"
+      },
+      "id": "node-whatsapp-ok",
+      "name": "WhatsApp — Banners Uploaded",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [2000, 220],
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "REPLACE_WITH_PHONE_NUMBER_ID",
+        "recipientPhoneNumber": "REPLACE_WITH_WHATSAPP_NUMBER_E164",
+        "textBody": "={{ '🤖 BannerBot\\n\\n⚠️ ' + $json.domain + ' scraped — 0 banners detected.\\nTier ' + $json.tier + ($json.geo ? ' · ' + $json.geo.toUpperCase() : '') + '\\n\\n📁 Empty folder created:\\n' + $json.folderUrl }}"
+      },
+      "id": "node-whatsapp-empty",
+      "name": "WhatsApp — No Banners",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [1340, 440],
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "WhatsApp account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "BannerBot Webhook": {
+      "main": [
+        [{ "node": "Prepare Run Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Run Data": {
+      "main": [
+        [{ "node": "Create Run Folder", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Run Folder": {
+      "main": [
+        [{ "node": "Split Banners", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Banners": {
+      "main": [
+        [{ "node": "Has Images?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Images?": {
+      "main": [
+        [{ "node": "WhatsApp — No Banners", "type": "main", "index": 0 }],
+        [{ "node": "Download Banner", "type": "main", "index": 0 }]
+      ]
+    },
+    "Download Banner": {
+      "main": [
+        [{ "node": "Upload to Drive", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upload to Drive": {
+      "main": [
+        [{ "node": "Collect All Uploads", "type": "main", "index": 0 }]
+      ]
+    },
+    "Collect All Uploads": {
+      "main": [
+        [{ "node": "WhatsApp — Banners Uploaded", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

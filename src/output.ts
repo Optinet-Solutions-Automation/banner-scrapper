@@ -86,31 +86,44 @@ async function uploadToGCS(localPath: string, domain: string): Promise<string | 
 }
 
 // ── n8n webhook ───────────────────────────────────────────────────────────────
+
+/** Converts a local banner file path → a public URL served by this backend.
+ *  e.g. /output/bet365_com/homepage/banner_01.webp → http://host/banners/bet365_com/homepage/banner_01.webp */
+function toImageUrl(localPath: string | undefined): string {
+  if (!localPath) return '';
+  const normalized = localPath.replace(/\\/g, '/');
+  const outputDir  = config.outputDir.replace(/\\/g, '/').replace(/\/?$/, '/');
+  const relative   = normalized.startsWith(outputDir)
+    ? normalized.slice(outputDir.length)            // bet365_com/homepage/banner_01.webp
+    : normalized.split('/').slice(-3).join('/');    // fallback: last 3 segments
+  return `${config.backendUrl}/banners/${relative}`;
+}
+
 async function sendToN8n(result: ScrapeResult): Promise<void> {
   const webhookUrl = config.n8nWebhookUrl;
   if (!webhookUrl) return;
+
+  const mapBanner = (b: typeof result.homepageBanners[0]) => ({
+    src:       b.src,
+    imageUrl:  toImageUrl(b.localPath),   // downloadable URL for n8n
+    localPath: b.localPath,
+    width:     b.width,
+    height:    b.height,
+    page:      b.page,
+    altText:   b.altText,
+    context:   b.context,
+    score:     b.score,
+  });
 
   const payload = JSON.stringify({
     url:             result.url,
     domain:          result.domain,
     tier:            result.tier,
+    geo:             result.geo ?? '',
+    success:         result.success,
     scrapedAt:       result.scrapedAt,
-    homepageBanners: result.homepageBanners.map(b => ({
-      src:       b.src,
-      localPath: b.localPath,
-      width:     b.width,
-      height:    b.height,
-      altText:   b.altText,
-      context:   b.context,
-    })),
-    promoBanners: result.promoBanners.map(b => ({
-      src:       b.src,
-      localPath: b.localPath,
-      width:     b.width,
-      height:    b.height,
-      altText:   b.altText,
-      context:   b.context,
-    })),
+    homepageBanners: result.homepageBanners.map(mapBanner),
+    promoBanners:    result.promoBanners.map(mapBanner),
   });
 
   const parsed   = new URL(webhookUrl);
