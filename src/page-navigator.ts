@@ -4,12 +4,23 @@ const PROMO_NAV_PATTERNS = [
   /promo/i, /bonus/i, /offer/i, /reward/i, /campaign/i, /deal/i,
 ];
 
+// Paths that indicate an action page (claim bonus, login, account) — NOT a promo listing page.
+// E.g. mystake888.com has a "Claim Bonus" CTA → /tl/account/freespins?bonus
+// which matches /bonus/i but is NOT the promotions page we want to scrape.
+const ACCOUNT_PATH_EXCLUDE = [
+  '/account/', '/login', '/register', '/signup', '/user/', '/profile/',
+  '/deposit', '/withdrawal', '/freespins', '/free-spin', '/cashier',
+  '/my-account', '/myaccount',
+];
+
 const PROMO_PATH_GUESSES = [
   '/promotions', '/promos', '/bonuses', '/offers', '/bonus',
   '/deals', '/rewards', '/campaigns', '/specials',
   // Language-prefixed paths common on multilingual casino sites (e.g. mystake888.com /en/...)
   '/en/promotions', '/en/promos', '/en/bonuses', '/en/offers',
   '/en/casino/promotions', '/en/static/promos',
+  '/tl/static/promos', '/tl/promotions', '/tl/promos',
+  '/ph/promotions', '/ph/promos',
   '/casino/promotions', '/casino/bonuses',
 ];
 
@@ -42,6 +53,11 @@ export async function findPromotionsUrl(page: Page, baseUrl: string): Promise<st
     if (!link.href.startsWith('http')) continue;
     // Same-site only (normalised — ignores www. difference)
     if (normaliseOrigin(link.href) !== baseOriginNorm) continue;
+
+    // Skip action/account links — they match /bonus/i etc. but are not promo listing pages.
+    // e.g. /tl/account/freespins?bonus, /account/deposit, /login
+    const hrefLower = link.href.toLowerCase();
+    if (ACCOUNT_PATH_EXCLUDE.some(ex => hrefLower.includes(ex))) continue;
 
     const combined = `${link.href} ${link.text}`.toLowerCase();
     for (const pat of PROMO_NAV_PATTERNS) {

@@ -229,10 +229,14 @@ export async function detectBanners(
       }
 
       // Pass 1: targeted banner-class elements
+      // [class*="slide"] catches carousel slide items (e.g. "g-slide", "slide-item",
+      // "keen-slide") whose siblings are ALL in the DOM simultaneously, so we can
+      // scrape every slide's background in one pass without waiting for auto-rotation.
       const targeted = Array.from(document.querySelectorAll(
         '[class*="banner"],[class*="hero"],[class*="slider"],[class*="carousel"],' +
         '[class*="promo"],[class*="swiper"],[class*="slick"],[class*="spotlight"],' +
-        '[class*="feature"],[class*="offer"],[class*="welcome"],[class*="billboard"]'
+        '[class*="feature"],[class*="offer"],[class*="welcome"],[class*="billboard"],' +
+        '[class*="slide"]'
       ));
       for (const el of targeted) tryAdd(el);
 

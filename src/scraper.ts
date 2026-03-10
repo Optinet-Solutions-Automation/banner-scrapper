@@ -178,12 +178,14 @@ export async function scrapeWithTier(
 
     // Wait for initial large image to appear (JS-hydrated hero carousels on SPAs
     // take extra time through a proxy before the first slide image loads).
+    // 8s timeout: CSS-background carousels (e.g. mystake888 g-slide) have no
+    // <img> elements at banner size — don't waste 30s waiting for them.
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('img')).some(img => {
         const r = img.getBoundingClientRect();
         return r.width >= 500 && r.height >= 150;
       }),
-      { timeout: 30_000 }
+      { timeout: 8_000 }
     ).catch(() => {});
 
     // Progressive capture: sample banners BEFORE each carousel advance so every
@@ -227,9 +229,15 @@ export async function scrapeWithTier(
         await addHomeBanners();
       }
       if (!dots.length) {
-        // Last resort: plain advanceCarousels so the carousel at least auto-rotates
+        // No clickable controls found — auto-rotating carousel (e.g. vertical-slider).
+        // Sample at intervals so each slide gets captured as it cycles through.
+        // advanceCarousels also tries keyboard ArrowRight as a last resort.
         await advanceCarousels(page);
-        await addHomeBanners();
+        for (let i = 0; i < 3; i++) {
+          await addHomeBanners();
+          await page.waitForTimeout(5000);
+        }
+        await addHomeBanners(); // final sample
       }
     }
 
@@ -294,19 +302,31 @@ export async function scrapeWithTier(
         emitProgress({ type: 'progress', domain, message: `Promo page loaded — scanning for banners…` });
 
         // Wait for promotional content to load.
-        // "Any image >= 200×100" fires immediately on logos/headers before API-fetched
-        // promo cards appear (Next.js SPAs fetch promo data after hydration).
-        // Instead wait until at least 3 large images are present — this indicates
-        // the promo grid has actually rendered, not just the page chrome.
+        // Handles two cases:
+        //   1. <img>-based promo cards (Next.js SPAs that fetch data via API after hydration)
+        //   2. CSS-background promo cards (e.g. mystake888.com uses div.promo-img with
+        //      background-image URLs — no <img> elements at all on the promo page)
         await page.waitForFunction(
           () => {
+            // Case 1: <img> elements (API-loaded promo cards)
             const imgs = Array.from(document.querySelectorAll('img'));
-            const large = imgs.filter(img => {
+            const largeImgs = imgs.filter(img => {
               const r = img.getBoundingClientRect();
               return (r.width >= 400 && r.height >= 80) ||
                      (img.naturalWidth >= 400 && img.naturalHeight >= 80);
             });
-            return large.length >= 3;
+            if (largeImgs.length >= 3) return true;
+
+            // Case 2: CSS background promo cards
+            const bgEls = Array.from(document.querySelectorAll(
+              '[class*="promo"],[class*="banner"],[class*="offer"],[class*="card"],[class*="deal"]'
+            ));
+            const largeBg = bgEls.filter(el => {
+              const r = el.getBoundingClientRect();
+              const bg = (window.getComputedStyle(el) as CSSStyleDeclaration).backgroundImage;
+              return r.width >= 300 && r.height >= 80 && bg !== 'none' && bg.includes('url(');
+            });
+            return largeBg.length >= 3;
           },
           { timeout: 30_000 }
         ).catch(() => {});
