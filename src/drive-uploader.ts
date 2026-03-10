@@ -99,7 +99,8 @@ export async function uploadBannersToDrive(
   domain: string
 ): Promise<DriveUploadResult | null> {
   const rootFolderId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
-  if (!rootFolderId || !process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return null;
+  const hasAuth = process.env.GOOGLE_OAUTH2_REFRESH_TOKEN || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!rootFolderId || !hasAuth) return null;
 
   try {
     const auth  = getAuthClient();
