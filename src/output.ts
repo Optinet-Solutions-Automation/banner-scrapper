@@ -148,12 +148,15 @@ async function sendToN8n(result: ScrapeResult): Promise<void> {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function deliverOutput(result: ScrapeResult): Promise<void> {
-  const hasGCS  = !!process.env.GCS_BUCKET;
-  const hasN8n  = !!config.n8nWebhookUrl;
+  const hasGCS   = !!process.env.GCS_BUCKET;
+  const hasN8n   = !!config.n8nWebhookUrl;
+  const hasDrive = !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID && process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+  const hasWA    = !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_RECIPIENT);
 
-  // Upload to GCS if configured
+  const allBanners = [...result.homepageBanners, ...result.promoBanners];
+
+  // ── GCS upload (optional) ────────────────────────────────────────────────
   if (hasGCS) {
-    const allBanners = [...result.homepageBanners, ...result.promoBanners];
     for (const banner of allBanners) {
       if (!banner.localPath) continue;
       const gcsUrl = await uploadToGCS(banner.localPath, result.domain);
@@ -164,12 +167,31 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
     }
   }
 
-  // Send summary to n8n if configured
+  // ── Google Drive upload (direct, no n8n needed) ──────────────────────────
+  let driveFolderUrl: string | null = null;
+  if (hasDrive && result.success) {
+    const { uploadBannersToDrive } = await import('./drive-uploader');
+    driveFolderUrl = await uploadBannersToDrive(allBanners, result.domain);
+  }
+
+  // ── WhatsApp notification ────────────────────────────────────────────────
+  if (hasWA) {
+    const { sendWhatsAppNotification } = await import('./whatsapp-notifier');
+    await sendWhatsAppNotification(
+      result.domain,
+      result.tier,
+      result.geo ?? '',
+      allBanners.length,
+      driveFolderUrl
+    );
+  }
+
+  // ── n8n webhook (optional, legacy) ──────────────────────────────────────
   if (hasN8n) {
     await sendToN8n(result);
   }
 
-  if (!hasGCS && !hasN8n) {
-    console.log(`  ℹ No GCS_BUCKET or N8N_WEBHOOK_URL set — images saved locally only`);
+  if (!hasGCS && !hasDrive && !hasN8n && !hasWA) {
+    console.log(`  ℹ Images saved locally — configure GOOGLE_DRIVE_ROOT_FOLDER_ID + GOOGLE_SERVICE_ACCOUNT_KEY to upload to Drive`);
   }
 }
