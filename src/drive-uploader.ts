@@ -29,16 +29,27 @@ function getMimeType(filePath: string): string {
 }
 
 function getAuthClient() {
-  const keyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!keyRaw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY env var not set');
+  // Prefer OAuth2 user credentials (avoids service-account quota issue on personal Drive)
+  const clientId     = process.env.GOOGLE_OAUTH2_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH2_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_OAUTH2_REFRESH_TOKEN;
 
-  // Support both plain JSON and base64-encoded JSON
+  if (clientId && clientSecret && refreshToken) {
+    const oauth2 = new google.auth.OAuth2(clientId, clientSecret);
+    oauth2.setCredentials({ refresh_token: refreshToken });
+    return oauth2 as unknown as InstanceType<typeof google.auth.GoogleAuth>;
+  }
+
+  // Fall back to service account (works with Shared Drives / GCS, not personal Drive)
+  const keyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!keyRaw) throw new Error('No Drive auth configured. Set GOOGLE_OAUTH2_* or GOOGLE_SERVICE_ACCOUNT_KEY.');
+
   let keyJson: string;
   try {
-    JSON.parse(keyRaw);          // already valid JSON
+    JSON.parse(keyRaw);
     keyJson = keyRaw;
   } catch {
-    keyJson = Buffer.from(keyRaw, 'base64').toString('utf-8');  // decode base64
+    keyJson = Buffer.from(keyRaw, 'base64').toString('utf-8');
   }
 
   const key = JSON.parse(keyJson);
@@ -92,7 +103,8 @@ export async function uploadBannersToDrive(
 
   try {
     const auth  = getAuthClient();
-    const drive = google.drive({ version: 'v3', auth });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const drive = google.drive({ version: 'v3', auth: auth as any });
 
     // Timestamp: 2026-03-10_14-22
     const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
