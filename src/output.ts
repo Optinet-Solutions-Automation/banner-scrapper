@@ -154,7 +154,8 @@ async function sendToN8n(
 export async function deliverOutput(result: ScrapeResult): Promise<void> {
   const hasGCS   = !!process.env.GCS_BUCKET;
   const hasN8n   = !!config.n8nWebhookUrl;
-  const hasDrive = !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID && process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+  const hasDrive = !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID &&
+    (process.env.GOOGLE_OAUTH2_REFRESH_TOKEN || process.env.GOOGLE_SERVICE_ACCOUNT_KEY));
   const hasWA    = !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_RECIPIENT);
 
   const allBanners = [...result.homepageBanners, ...result.promoBanners];
@@ -201,6 +202,6 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
   }
 
   if (!hasGCS && !hasDrive && !hasN8n && !hasWA) {
-    console.log(`  ℹ Images saved locally — configure GOOGLE_DRIVE_ROOT_FOLDER_ID + GOOGLE_SERVICE_ACCOUNT_KEY to upload to Drive`);
+    console.log(`  ℹ Images saved locally — configure GOOGLE_DRIVE_ROOT_FOLDER_ID + GOOGLE_OAUTH2_REFRESH_TOKEN to upload to Drive`);
   }
 }
