@@ -77,11 +77,16 @@ async function ensureFolder(
   return folder.data.id!;
 }
 
-/** Uploads all banners to Drive and returns the shareable folder URL. */
+export interface DriveUploadResult {
+  folderId:  string;
+  folderUrl: string;
+}
+
+/** Uploads all banners to Drive and returns the folder ID + shareable URL. */
 export async function uploadBannersToDrive(
   banners: BannerImage[],
   domain: string
-): Promise<string | null> {
+): Promise<DriveUploadResult | null> {
   const rootFolderId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
   if (!rootFolderId || !process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return null;
 
@@ -130,7 +135,7 @@ export async function uploadBannersToDrive(
 
     const folderUrl = `https://drive.google.com/drive/folders/${runFolderId}`;
     console.log(`  ☁ Drive folder: ${folderUrl}`);
-    return folderUrl;
+    return { folderId: runFolderId, folderUrl };
   } catch (err) {
     console.warn(`  ⚠ Google Drive upload error: ${(err as Error).message}`);
     return null;

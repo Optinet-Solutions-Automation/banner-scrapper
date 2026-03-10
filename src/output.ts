@@ -99,19 +99,20 @@ function toImageUrl(localPath: string | undefined): string {
   return `${config.backendUrl}/banners/${relative}`;
 }
 
-async function sendToN8n(result: ScrapeResult): Promise<void> {
+async function sendToN8n(
+  result: ScrapeResult,
+  driveResult?: { folderId: string; folderUrl: string } | null
+): Promise<void> {
   const webhookUrl = config.n8nWebhookUrl;
   if (!webhookUrl) return;
 
   const mapBanner = (b: typeof result.homepageBanners[0]) => ({
     src:       b.src,
     imageUrl:  toImageUrl(b.localPath),   // downloadable URL for n8n
-    localPath: b.localPath,
     width:     b.width,
     height:    b.height,
     page:      b.page,
     altText:   b.altText,
-    context:   b.context,
     score:     b.score,
   });
 
@@ -122,6 +123,9 @@ async function sendToN8n(result: ScrapeResult): Promise<void> {
     geo:             result.geo ?? '',
     success:         result.success,
     scrapedAt:       result.scrapedAt,
+    // Drive folder — n8n uses these to list files and run Claude Vision
+    driveFolderId:   driveResult?.folderId  ?? null,
+    driveFolderUrl:  driveResult?.folderUrl ?? null,
     homepageBanners: result.homepageBanners.map(mapBanner),
     promoBanners:    result.promoBanners.map(mapBanner),
   });
@@ -167,11 +171,11 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
     }
   }
 
-  // ── Google Drive upload (direct, no n8n needed) ──────────────────────────
-  let driveFolderUrl: string | null = null;
+  // ── Google Drive upload ──────────────────────────────────────────────────
+  let driveResult: { folderId: string; folderUrl: string } | null = null;
   if (hasDrive && result.success) {
     const { uploadBannersToDrive } = await import('./drive-uploader');
-    driveFolderUrl = await uploadBannersToDrive(allBanners, result.domain);
+    driveResult = await uploadBannersToDrive(allBanners, result.domain);
   }
 
   // ── WhatsApp notification ────────────────────────────────────────────────
@@ -182,13 +186,13 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
       result.tier,
       result.geo ?? '',
       allBanners.length,
-      driveFolderUrl
+      driveResult?.folderUrl ?? null
     );
   }
 
-  // ── n8n webhook (optional, legacy) ──────────────────────────────────────
+  // ── n8n webhook — includes driveFolderId so n8n can run Claude Vision ────
   if (hasN8n) {
-    await sendToN8n(result);
+    await sendToN8n(result, driveResult);
   }
 
   if (!hasGCS && !hasDrive && !hasN8n && !hasWA) {
