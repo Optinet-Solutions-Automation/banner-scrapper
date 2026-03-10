@@ -854,7 +854,7 @@ export default function Home() {
       // None have Drive configured — show message on each card
       const fallback: Record<string, PromptItem[]> = {};
       for (const r of targets) {
-        fallback[r.domain] = [{ prompt: 'Drive folder not found — enable GOOGLE_DRIVE_ROOT_FOLDER_ID + GOOGLE_SERVICE_ACCOUNT_KEY and re-scrape.' }];
+        fallback[r.domain] = [{ prompt: 'Drive folder not found — please re-scrape this site (Drive upload is now configured).' }];
       }
       setPromptsByDomain(prev => ({ ...prev, ...fallback }));
       return;
