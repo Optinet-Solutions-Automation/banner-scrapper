@@ -16,10 +16,39 @@ import { google, drive_v3 } from 'googleapis';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import sharp from 'sharp';
 import { BannerImage } from './types';
 
 function md5(filePath: string): string {
   return crypto.createHash('md5').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+/** Average Hash (aHash) — resize to 8×8 greyscale, return 64-char binary string. */
+async function aHash(filePath: string): Promise<string> {
+  try {
+    const pixels = await sharp(filePath)
+      .resize(8, 8, { fit: 'fill' })
+      .greyscale()
+      .raw()
+      .toBuffer();
+    const avg = pixels.reduce((s, v) => s + v, 0) / pixels.length;
+    return Array.from(pixels).map(v => (v >= avg ? '1' : '0')).join('');
+  } catch {
+    return '';
+  }
+}
+
+/** Hamming distance between two binary strings. */
+function hammingDistance(a: string, b: string): number {
+  if (a.length !== b.length || a.length === 0) return 999;
+  let dist = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) dist++;
+  return dist;
+}
+
+/** Returns true if two hashes are visually the same (threshold = 8/64 bits). */
+function isSimilar(a: string, b: string): boolean {
+  return hammingDistance(a, b) <= 8;
 }
 
 function getMimeType(filePath: string): string {
@@ -113,7 +142,7 @@ export async function uploadBannersToDrive(
     // Upload directly into ROOT/domain/ (no timestamp subfolder — images accumulate)
     const domainFolderId = await ensureFolder(drive, domain, rootFolderId);
 
-    // Fetch existing files (name + description used to store hash)
+    // Fetch existing files — description stores "md5::ahash" for dedup
     const existingRes = await drive.files.list({
       q: `'${domainFolderId}' in parents and trashed=false`,
       fields: 'files(name,description)',
@@ -121,19 +150,43 @@ export async function uploadBannersToDrive(
     });
     const existingFiles = existingRes.data.files ?? [];
     const existingNames = new Set(existingFiles.map(f => f.name ?? ''));
-    // description stores the md5 hash so we can skip identical images
-    const existingHashes = new Set(existingFiles.map(f => f.description ?? '').filter(Boolean));
+    const existingMd5s  = new Set(existingFiles.map(f => (f.description ?? '').split('::')[0]).filter(Boolean));
+    const existingAHashes = existingFiles.map(f => (f.description ?? '').split('::')[1] ?? '').filter(Boolean);
 
-    // Deduplicate the incoming batch by hash first
-    const seenHashes = new Set<string>();
+    // Compute hashes for all incoming banners first
+    const hashMap = new Map<string, { md5: string; ahash: string }>();
+    for (const banner of banners) {
+      if (!banner.localPath || !fs.existsSync(banner.localPath)) continue;
+      const m = md5(banner.localPath);
+      const a = await aHash(banner.localPath);
+      hashMap.set(banner.localPath, { md5: m, ahash: a });
+    }
+
+    // Deduplicate: skip exact duplicates (md5) AND visually similar images (ahash)
+    const seenMd5s   = new Set<string>();
+    const seenAHashes: string[] = [];
+
     const uniqueBanners = banners.filter(b => {
       if (!b.localPath || !fs.existsSync(b.localPath)) return false;
-      const hash = md5(b.localPath);
-      if (seenHashes.has(hash) || existingHashes.has(hash)) {
-        console.log(`  ⟳ Drive: skipping duplicate — ${path.basename(b.localPath)}`);
+      const h = hashMap.get(b.localPath);
+      if (!h) return false;
+
+      // Exact duplicate
+      if (existingMd5s.has(h.md5) || seenMd5s.has(h.md5)) {
+        console.log(`  ⟳ Drive: skipping exact duplicate — ${path.basename(b.localPath)}`);
         return false;
       }
-      seenHashes.add(hash);
+      // Visually similar (same promo, different size)
+      const isVisualDupe =
+        (h.ahash && existingAHashes.some(eh => isSimilar(h.ahash, eh))) ||
+        (h.ahash && seenAHashes.some(eh => isSimilar(h.ahash, eh)));
+      if (isVisualDupe) {
+        console.log(`  ⟳ Drive: skipping visual duplicate — ${path.basename(b.localPath)}`);
+        return false;
+      }
+
+      seenMd5s.add(h.md5);
+      if (h.ahash) seenAHashes.push(h.ahash);
       return true;
     });
 
@@ -147,7 +200,6 @@ export async function uploadBannersToDrive(
       const prefix  = isPromo ? 'pr' : 'hp';
       counter[prefix] = (counter[prefix] ?? 0) + 1;
       const ext      = path.extname(banner.localPath!) || '.jpg';
-      // Find a filename that doesn't already exist in the folder
       let idx = counter[prefix]!;
       let filename = `${prefix}_${String(idx).padStart(2, '0')}${ext}`;
       while (existingNames.has(filename)) {
@@ -156,12 +208,12 @@ export async function uploadBannersToDrive(
       }
       existingNames.add(filename);
 
-      const hash = md5(banner.localPath!);
+      const h = hashMap.get(banner.localPath!)!;
       await drive.files.create({
         requestBody: {
           name:        filename,
           parents:     [domainFolderId],
-          description: hash,   // store hash so future runs can skip this image
+          description: `${h.md5}::${h.ahash}`,  // "md5::ahash" for future dedup
         },
         media: {
           mimeType: getMimeType(banner.localPath!),
