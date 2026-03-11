@@ -253,7 +253,20 @@ export async function scrapeWithTier(
 
     await takeScreenshot(page, `tier${config.tier}_loaded`);
 
-    const validation = await validatePageSuccess(page, config.tier);
+    let validation = await validatePageSuccess(page, config.tier);
+
+    // On residential proxy (Tier 4): Cloudflare Turnstile sometimes auto-solves
+    // within 10-20 s for residential IPs. Wait and re-check before giving up.
+    if (!validation.success && validation.failureReason === 'cloudflare_challenge' && config.tier >= 4) {
+      console.log(`  ⏳ CF challenge on residential proxy — waiting 18s for auto-resolve…`);
+      emitProgress({ type: 'progress', domain, message: 'CF challenge detected — waiting for auto-resolve…' });
+      await page.waitForTimeout(18_000);
+      validation = await validatePageSuccess(page, config.tier);
+      if (validation.success) {
+        console.log(`  ✓ CF challenge resolved after wait`);
+      }
+    }
+
     if (!validation.success) {
       console.log(`  ✗ Tier ${config.tier} failed: ${validation.failureReason}`);
       await takeScreenshot(page, `tier${config.tier}_failed_${validation.failureReason}`);
