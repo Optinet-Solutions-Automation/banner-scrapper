@@ -66,37 +66,42 @@ async function progressiveScrollCapture(
     viewH: window.innerHeight,
   }));
 
-  const STEP     = Math.round(viewH * 0.75); // 75% step → overlapping windows
-  const MAX_STEPS = 25;                       // safety cap (~40 000px max)
+  const STEP     = Math.round(viewH * 0.6);  // 60% step — smaller overlap catches more
+  const MAX_STEPS = 30;                       // safety cap
 
   for (let step = 0; step <= MAX_STEPS; step++) {
     const scrollY = step * STEP;
-    await page.evaluate(y => window.scrollTo(0, y), scrollY);
 
-    // Minimum dwell so the browser starts fetching lazy images that just entered
-    // the viewport. Without this, the waitForFunction fires immediately because
-    // images haven't had a chance to start loading yet.
-    await page.waitForTimeout(1500);
+    // Use mouse.wheel for natural scroll events — some sites (e.g. goldenbet) use
+    // Intersection Observer lazy loading that only fires on real scroll events, NOT
+    // on programmatic window.scrollTo. Mouse wheel triggers IO reliably.
+    // Also fire window/document scroll events as a belt-and-suspenders fallback.
+    await page.evaluate((targetY: number) => {
+      window.scrollTo({ top: targetY, behavior: 'instant' });
+      window.dispatchEvent(new Event('scroll'));
+      document.dispatchEvent(new Event('scroll'));
+    }, scrollY);
+
+    // Give IO callbacks time to fire and set real src on lazy images.
+    // 2.5s minimum — IO can be slow on JS-heavy pages through a proxy.
+    await page.waitForTimeout(2500);
 
     // Smart wait: poll until every near-viewport <img> with a real src is done
-    // loading (img.complete = true means loaded or errored).
-    // KEY: do NOT filter by rendered size — lazy images have getBoundingClientRect
-    // width=0 before they load, so r.width > 50 would skip them causing the
-    // function to exit immediately thinking there's nothing to wait for.
+    // loading. Does NOT filter by size — unloaded lazy images have 0×0 bbox.
     await page.waitForFunction(
       () => {
         const imgs = Array.from(document.querySelectorAll('img'));
         const nearView = imgs.filter(img => {
           const r = img.getBoundingClientRect();
-          return r.top < window.innerHeight + 100 && r.bottom > -100;
+          return r.top < window.innerHeight + 200 && r.bottom > -200;
         });
         return nearView.every(img => {
           const src = img.getAttribute('src') ?? '';
           if (!src || src.startsWith('data:')) return true;
-          return img.complete; // complete=true when loaded OR errored
+          return img.complete;
         });
       },
-      { timeout: 7000 }
+      { timeout: 8000 }
     ).catch(() => {});
 
     await addNew();
