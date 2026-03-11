@@ -60,65 +60,60 @@ async function progressiveScrollCapture(
     }
   };
 
-  // Page / viewport dimensions
-  const { pageH, viewH } = await page.evaluate(() => ({
-    pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+  const { viewH, viewW } = await page.evaluate(() => ({
     viewH: window.innerHeight,
+    viewW: window.innerWidth,
   }));
 
-  const STEP     = Math.round(viewH * 0.6);  // 60% step — smaller overlap catches more
-  const MAX_STEPS = 30;                       // safety cap
+  // ── Phase 1: Pre-scroll to bottom with mouse.wheel ──────────────────────────
+  // page.mouse.wheel() generates real browser WheelEvents — the only method that
+  // reliably fires Intersection Observer callbacks on all sites (including those
+  // like goldenbet that ignore programmatic window.scrollTo and synthetic events).
+  // Move mouse to page centre so wheel events are captured by the document.
+  await page.mouse.move(Math.round(viewW / 2), Math.round(viewH / 2));
 
-  for (let step = 0; step <= MAX_STEPS; step++) {
-    const scrollY = step * STEP;
-
-    // Use mouse.wheel for natural scroll events — some sites (e.g. goldenbet) use
-    // Intersection Observer lazy loading that only fires on real scroll events, NOT
-    // on programmatic window.scrollTo. Mouse wheel triggers IO reliably.
-    // Also fire window/document scroll events as a belt-and-suspenders fallback.
-    await page.evaluate((targetY: number) => {
-      window.scrollTo({ top: targetY, behavior: 'instant' });
-      window.dispatchEvent(new Event('scroll'));
-      document.dispatchEvent(new Event('scroll'));
-    }, scrollY);
-
-    // Give IO callbacks time to fire and set real src on lazy images.
-    // 2.5s minimum — IO can be slow on JS-heavy pages through a proxy.
-    await page.waitForTimeout(2500);
-
-    // Smart wait: poll until every near-viewport <img> with a real src is done
-    // loading. Does NOT filter by size — unloaded lazy images have 0×0 bbox.
-    await page.waitForFunction(
-      () => {
-        const imgs = Array.from(document.querySelectorAll('img'));
-        const nearView = imgs.filter(img => {
-          const r = img.getBoundingClientRect();
-          return r.top < window.innerHeight + 200 && r.bottom > -200;
-        });
-        return nearView.every(img => {
-          const src = img.getAttribute('src') ?? '';
-          if (!src || src.startsWith('data:')) return true;
-          return img.complete;
-        });
-      },
-      { timeout: 8000 }
-    ).catch(() => {});
-
-    await addNew();
-
-    if (scrollY + viewH >= pageH) break; // reached the bottom
+  // Scroll to page bottom in one fast pass to trigger all IO-based lazy loaders.
+  const { pageH: totalH } = await page.evaluate(() => ({
+    pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+  }));
+  const WHEEL_STEP = 600;
+  const wheelSteps = Math.ceil(totalH / WHEEL_STEP);
+  for (let i = 0; i < Math.min(wheelSteps, 40); i++) {
+    await page.mouse.wheel(0, WHEEL_STEP);
+    await page.waitForTimeout(120); // brief pause per wheel tick
   }
-
-  // Final sweep: wait for any stragglers that finished loading after the scroll
-  // moved past them, then do one last detectBanners pass on the full page.
+  // After reaching bottom, wait for all triggered lazy images to load.
+  await page.waitForTimeout(3000);
   await page.waitForFunction(
     () => Array.from(document.querySelectorAll('img')).every(img => {
       const src = img.getAttribute('src') ?? '';
       if (!src || src.startsWith('data:')) return true;
       return img.complete;
     }),
-    { timeout: 8000 }
+    { timeout: 10000 }
   ).catch(() => {});
+
+  // ── Phase 2: Step-by-step scroll back through the page to sample banners ────
+  // Now that all images are loaded, scroll back to top and step down, calling
+  // detectBanners at each position to pick up all loaded images.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(500);
+
+  const { pageH } = await page.evaluate(() => ({
+    pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+  }));
+  const STEP = Math.round(viewH * 0.6);
+  const MAX_STEPS = 35;
+
+  for (let step = 0; step <= MAX_STEPS; step++) {
+    const scrollY = step * STEP;
+    await page.evaluate((y: number) => window.scrollTo(0, y), scrollY);
+    await page.waitForTimeout(300);
+    await addNew();
+    if (scrollY + viewH >= pageH) break;
+  }
+
+  // Final sweep after returning to top
   await addNew();
 
   // Return to top
