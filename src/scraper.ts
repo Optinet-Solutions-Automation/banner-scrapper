@@ -72,7 +72,7 @@ async function progressiveScrollCapture(
   }));
 
   const STEP     = Math.round(viewH * 0.7);   // ~70 % of viewport per step
-  const MAX_STEPS = 25;
+  const MAX_STEPS = 30;
   let noNewCount  = 0;                         // consecutive steps with no new images
 
   // Position mouse at centre for mouse.wheel IO-trigger (avoids interactive elements
@@ -83,7 +83,7 @@ async function progressiveScrollCapture(
     const targetY = (step + 1) * STEP;
 
     // ── Scroll via JS — handles both window and custom scroll containers ──
-    await page.evaluate((y: number) => {
+    const { windowScrollY, containerScrollTop, pageH } = await page.evaluate((y: number) => {
       // 1. Window-level scroll (works when body is the scroll target)
       window.scrollTo(0, y);
 
@@ -100,6 +100,11 @@ async function progressiveScrollCapture(
         if (excess > bestExcess) { bestExcess = excess; best = el; }
       }
       if (best) (best as HTMLElement).scrollTop = y;
+      return {
+        windowScrollY: window.scrollY,
+        containerScrollTop: best ? (best as HTMLElement).scrollTop : -1,
+        pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+      };
     }, targetY);
 
     // ── mouse.wheel nudge — fires a real WheelEvent that reliably triggers
@@ -135,19 +140,22 @@ async function progressiveScrollCapture(
       noNewCount = 0;
     }
 
-    // Termination: either reached the end of the page, or 4 consecutive steps
-    // with no new images (handles pages that stop yielding content mid-scroll).
-    const { pageH } = await page.evaluate(() => ({
-      pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
-    }));
-    if (targetY + viewH >= pageH || noNewCount >= 4) break;
+    // Debug: emit per-step info to terminal
+    emitProgress({ type: 'progress', domain: '', message:
+      `Scroll step ${step + 1}: target=${targetY} win=${windowScrollY} cont=${containerScrollTop} pageH=${pageH} imgs=${collected.length} noNew=${noNewCount}` });
+
+    // Only early-exit when we've covered ≥80% of the page AND had 6 empty steps.
+    // Never exit at <50% of page — some promo grids stack below a tall hero section.
+    const pctCovered = (targetY + viewH) / pageH;
+    if (targetY + viewH >= pageH || (noNewCount >= 6 && pctCovered >= 0.8)) break;
   }
 
   // ── Force-load pass ─────────────────────────────────────────────────────
-  // Some lazy loaders use data-src attributes and only swap to real src after a
-  // library (e.g. lazysizes) detects visibility. If images are in the DOM but
-  // still have data-src / loading="lazy", copy data-src → src directly.
-  const forcedCount = await page.evaluate(() => {
+  // Two strategies:
+  // A) data-src: copy attribute → src for attribute-based lazy loaders
+  // B) scrollIntoViewIfNeeded: scroll every img element into the viewport so the
+  //    browser's IO triggers for each one. Works for loading="lazy" srcset images.
+  const forcedDataSrc = await page.evaluate(() => {
     let n = 0;
     for (const img of Array.from(document.querySelectorAll('img')) as HTMLImageElement[]) {
       const dataSrc = img.getAttribute('data-src') || img.getAttribute('data-lazy')
@@ -155,16 +163,25 @@ async function progressiveScrollCapture(
       if (dataSrc && (!img.src || img.src.startsWith('data:') || img.src === window.location.href)) {
         img.src = dataSrc; n++;
       }
-      if (img.loading === 'lazy') { img.loading = 'eager'; }
     }
     return n;
   });
-  if (forcedCount > 0) {
-    await page.waitForTimeout(3000);
+
+  // Scroll every img into view so IO fires for each (handles loading="lazy" + srcset).
+  // Do this in a single batch to avoid per-element awaits being too slow.
+  const imgHandles = await page.$$('img');
+  for (const handle of imgHandles) {
+    await handle.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
   }
+  // After scrolling all imgs into view, wait for the proxy to fetch them.
+  const extraWait = forcedDataSrc > 0 ? 5000 : 4000;
+  await page.waitForTimeout(extraWait);
 
   // Final sweep — catches anything loaded during the force-load pass.
+  const beforeFinal = collected.length;
   await addNew();
+  emitProgress({ type: 'progress', domain: '', message:
+    `Force-load pass: dataSrc=${forcedDataSrc} scrolled=${imgHandles.length} imgs, new=${collected.length - beforeFinal}` });
 
   // Return to top.
   await page.evaluate(() => window.scrollTo(0, 0));
