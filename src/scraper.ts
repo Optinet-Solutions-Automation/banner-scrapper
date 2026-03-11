@@ -151,15 +151,13 @@ async function progressiveScrollCapture(
   }
 
   // ── Force-load pass ─────────────────────────────────────────────────────
-  // Two strategies:
-  // A) data-src: copy attribute → src for attribute-based lazy loaders
-  // B) scrollIntoViewIfNeeded: scroll every img element into the viewport so the
-  //    browser's IO triggers for each one. Works for loading="lazy" srcset images.
+  // Strategy A: data-src copy — handle attribute-based lazy loaders (jQuery lazyload, etc.)
+  // This is pure DOM manipulation — not detectable as bot-like scrolling.
   const forcedDataSrc = await page.evaluate(() => {
     let n = 0;
     for (const img of Array.from(document.querySelectorAll('img')) as HTMLImageElement[]) {
       const dataSrc = img.getAttribute('data-src') || img.getAttribute('data-lazy')
-                   || img.getAttribute('data-original') || '';
+                   || img.getAttribute('data-original') || img.getAttribute('data-lazysrc') || '';
       if (dataSrc && (!img.src || img.src.startsWith('data:') || img.src === window.location.href)) {
         img.src = dataSrc; n++;
       }
@@ -167,21 +165,36 @@ async function progressiveScrollCapture(
     return n;
   });
 
-  // Scroll every img into view so IO fires for each (handles loading="lazy" + srcset).
-  // Do this in a single batch to avoid per-element awaits being too slow.
-  const imgHandles = await page.$$('img');
-  for (const handle of imgHandles) {
-    await handle.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+  // Strategy B: slow reverse scroll (bottom → top) — re-triggers IO for any images
+  // the forward pass missed, without the rapid per-element jumping that bot detectors catch.
+  // We do this with gentle mouse.wheel nudges, spaced out to look human.
+  {
+    const { pageH: finalPageH, viewH: finalViewH } = await page.evaluate(() => ({
+      pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+      viewH: window.innerHeight,
+    }));
+    // Scroll to absolute bottom first (catches anything at very end of page)
+    await page.evaluate((h) => window.scrollTo(0, h), finalPageH);
+    await page.mouse.wheel(0, 3);
+    await page.waitForTimeout(2000);
+    await addNew();
+
+    // Now scroll back up in 3 big steps — gives IO another chance per section
+    const reverseStep = Math.round(finalViewH * 1.5);
+    for (let pos = finalPageH - reverseStep; pos > 0; pos -= reverseStep) {
+      await page.evaluate((y) => window.scrollTo(0, y), pos);
+      await page.mouse.wheel(0, -3);
+      await page.waitForTimeout(1200);
+    }
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(forcedDataSrc > 0 ? 3000 : 2000);
   }
-  // After scrolling all imgs into view, wait for the proxy to fetch them.
-  const extraWait = forcedDataSrc > 0 ? 5000 : 4000;
-  await page.waitForTimeout(extraWait);
 
   // Final sweep — catches anything loaded during the force-load pass.
   const beforeFinal = collected.length;
   await addNew();
   emitProgress({ type: 'progress', domain: '', message:
-    `Force-load pass: dataSrc=${forcedDataSrc} scrolled=${imgHandles.length} imgs, new=${collected.length - beforeFinal}` });
+    `Force-load pass: dataSrc=${forcedDataSrc} new=${collected.length - beforeFinal}` });
 
   // Return to top.
   await page.evaluate(() => window.scrollTo(0, 0));

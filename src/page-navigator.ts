@@ -16,6 +16,7 @@ const ACCOUNT_PATH_EXCLUDE = [
 const PROMO_PATH_GUESSES = [
   '/promotions', '/promos', '/bonuses', '/offers', '/bonus',
   '/deals', '/rewards', '/campaigns', '/specials',
+  '/static/promos', '/static/promotions',   // goldenbet.com and similar
   // Language-prefixed paths common on multilingual casino sites (e.g. mystake888.com /en/...)
   '/en/promotions', '/en/promos', '/en/bonuses', '/en/offers',
   '/en/casino/promotions', '/en/static/promos',
