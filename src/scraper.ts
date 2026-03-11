@@ -73,32 +73,48 @@ async function progressiveScrollCapture(
     const scrollY = step * STEP;
     await page.evaluate(y => window.scrollTo(0, y), scrollY);
 
-    // Minimum dwell so lazy images start their fetch request.
+    // Minimum dwell so the browser starts fetching lazy images that just entered
+    // the viewport. Without this, the waitForFunction fires immediately because
+    // images haven't had a chance to start loading yet.
     await page.waitForTimeout(1500);
 
-    // Smart wait: keep polling until all visible <img> elements with a real src
-    // have finished loading (naturalWidth > 0). Handles slow proxy fetches.
-    // Falls through after 6 s so we never stall forever on a broken image.
+    // Smart wait: poll until every near-viewport <img> with a real src is done
+    // loading (img.complete = true means loaded or errored).
+    // KEY: do NOT filter by rendered size — lazy images have getBoundingClientRect
+    // width=0 before they load, so r.width > 50 would skip them causing the
+    // function to exit immediately thinking there's nothing to wait for.
     await page.waitForFunction(
       () => {
         const imgs = Array.from(document.querySelectorAll('img'));
-        const inView = imgs.filter(img => {
+        const nearView = imgs.filter(img => {
           const r = img.getBoundingClientRect();
-          return r.top < window.innerHeight && r.bottom > 0 && r.width > 50 && r.height > 50;
+          return r.top < window.innerHeight + 100 && r.bottom > -100;
         });
-        if (inView.length === 0) return true;
-        return inView.every(img => {
+        return nearView.every(img => {
           const src = img.getAttribute('src') ?? '';
-          return !src || src.startsWith('data:') || img.naturalWidth > 0;
+          if (!src || src.startsWith('data:')) return true;
+          return img.complete; // complete=true when loaded OR errored
         });
       },
-      { timeout: 6000 }
+      { timeout: 7000 }
     ).catch(() => {});
 
     await addNew();
 
     if (scrollY + viewH >= pageH) break; // reached the bottom
   }
+
+  // Final sweep: wait for any stragglers that finished loading after the scroll
+  // moved past them, then do one last detectBanners pass on the full page.
+  await page.waitForFunction(
+    () => Array.from(document.querySelectorAll('img')).every(img => {
+      const src = img.getAttribute('src') ?? '';
+      if (!src || src.startsWith('data:')) return true;
+      return img.complete;
+    }),
+    { timeout: 8000 }
+  ).catch(() => {});
+  await addNew();
 
   // Return to top
   await page.evaluate(() => window.scrollTo(0, 0));
