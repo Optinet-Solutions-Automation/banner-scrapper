@@ -59,6 +59,37 @@ async function progressiveScrollCapture(
     }
   };
 
+  // ── Diagnostic dump — tells us exactly what's in the DOM so we know what to fix ──
+  if (pageType === 'promotions') {
+    const diag = await page.evaluate(() => {
+      const imgs = Array.from(document.querySelectorAll('img')) as HTMLImageElement[];
+      const allImgInfo = imgs.map(img => ({
+        src:    (img.src || '').substring(0, 80),
+        dataSrc: img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('data-original') || '',
+        nat:    `${img.naturalWidth}x${img.naturalHeight}`,
+        rect:   (() => { const r = img.getBoundingClientRect(); return `${Math.round(r.width)}x${Math.round(r.height)}`; })(),
+        cls:    img.className.substring(0, 40),
+      }));
+      const htmlOvf  = window.getComputedStyle(document.documentElement).overflow;
+      const bodyOvf  = window.getComputedStyle(document.body).overflow;
+      const hasJQ    = !!(( window as any).jQuery || (window as any).$);
+      // Scrollable containers (any excess height)
+      const scrollables = Array.from(document.querySelectorAll('*'))
+        .filter(el => el !== document.body && el !== document.documentElement)
+        .map(el => ({ tag: el.tagName, id: (el as HTMLElement).id?.substring(0,20), cls: (el as HTMLElement).className?.toString().substring(0,40), exc: (el as HTMLElement).scrollHeight - (el as HTMLElement).clientHeight }))
+        .filter(x => x.exc > 100)
+        .sort((a,b) => b.exc - a.exc)
+        .slice(0, 5);
+      return { totalImgs: imgs.length, allImgInfo: allImgInfo.slice(0,20), htmlOvf, bodyOvf, hasJQ, scrollables,
+               bodyScrollH: document.body.scrollHeight, docScrollH: document.documentElement.scrollHeight };
+    });
+    emitProgress({ type: 'progress', domain: '', message: `[DIAG] totalImgs=${diag.totalImgs} htmlOvf=${diag.htmlOvf} bodyOvf=${diag.bodyOvf} hasJQ=${diag.hasJQ} bodyScrollH=${diag.bodyScrollH}` });
+    emitProgress({ type: 'progress', domain: '', message: `[DIAG] scrollables=${JSON.stringify(diag.scrollables)}` });
+    for (const img of diag.allImgInfo) {
+      emitProgress({ type: 'progress', domain: '', message: `[IMG] rect=${img.rect} nat=${img.nat} dataSrc="${img.dataSrc}" cls="${img.cls}" src="${img.src}"` });
+    }
+  }
+
   // Capture initial state (above-fold content)
   await addNew();
 
