@@ -9,7 +9,6 @@ import { findPromotionsUrl } from './page-navigator';
 import { downloadBanners } from './image-downloader';
 import { takeScreenshot } from './screenshot';
 import { emitProgress } from './progress-emitter';
-import { deduplicateByVisualHash } from './phash';
 
 // ── Deduplication helpers ────────────────────────────────────────────────────
 
@@ -389,20 +388,11 @@ export async function scrapeWithTier(
       emitProgress({ type: 'progress', domain, message: `No promotions page found` });
     }
 
-    // Final visual dedup: remove same promo at different sizes across both pages.
-    // aHash resizes to 8×8 and compares greyscale — catches same image at diff dimensions.
-    const allBanners = [...homepageBanners, ...promoBanners];
-    const allDeduped = await deduplicateByVisualHash(allBanners);
-    const visualDups = allBanners.length - allDeduped.length;
-    if (visualDups > 0) console.log(`  ↩ Removed ${visualDups} visual duplicate(s) across pages`);
-    const hpDeduped = allDeduped.filter(b => b.page !== 'promotions');
-    const prDeduped = allDeduped.filter(b => b.page === 'promotions');
-
     await page.close();
     return {
       tierResult: { success: true, tier: config.tier },
-      homepageBanners: hpDeduped,
-      promoBanners: prDeduped,
+      homepageBanners,
+      promoBanners,
     };
   } catch (err) {
     console.error(`  ✗ Tier ${config.tier} error: ${(err as Error).message}`);
