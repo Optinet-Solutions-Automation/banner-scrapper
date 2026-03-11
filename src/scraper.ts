@@ -366,15 +366,20 @@ export async function scrapeWithTier(
         const promoRaw = await progressiveScrollCapture(page, 'promotions', new Set<string>());
         await takeScreenshot(page, `tier${config.tier}_promos_scraped`);
         console.log(`  Found ${promoRaw.length} promo banner candidate(s)`);
+        emitProgress({ type: 'progress', domain, message: `Promo raw: ${promoRaw.length} detected` });
 
         // Deduplicate within promo page, then against homepage banners.
         const promoDeduped1 = deduplicateByIdentity(promoRaw);
         const homepageUrlSet = new Set(homepageDeduped.map(b => imageKey(b.src)));
+        const urlFiltered = promoDeduped1.filter(b => homepageUrlSet.has(imageKey(b.src)));
         const promoDeduped = promoDeduped1.filter(b => !homepageUrlSet.has(imageKey(b.src)));
         const dupCount = promoRaw.length - promoDeduped.length;
         if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} duplicate(s) (within promo or already on homepage)`);
+        if (urlFiltered.length > 0) {
+          emitProgress({ type: 'progress', domain, message: `URL-deduped away: ${urlFiltered.map(b => `${b.width}×${b.height}`).join(', ')}` });
+        }
 
-        emitProgress({ type: 'progress', domain, message: `Promo page: ${promoDeduped.length} banner(s) found` });
+        emitProgress({ type: 'progress', domain, message: `Promo unique: ${promoDeduped.length} (after URL dedup vs homepage)` });
         promoBanners = await downloadBanners(context, promoDeduped, domain, 'promotions');
       } else {
         console.log(`  ⚠ Promo page blocked: ${promoValidation.failureReason}`);
