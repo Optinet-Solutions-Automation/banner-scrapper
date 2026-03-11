@@ -64,58 +64,55 @@ async function progressiveScrollCapture(
     viewW: window.innerWidth,
   }));
 
-  // ── Phase 1: Pre-scroll to bottom with mouse.wheel ──────────────────────────
-  // page.mouse.wheel() generates real browser WheelEvents — the only method that
-  // reliably fires Intersection Observer callbacks on all sites (including those
-  // like goldenbet that ignore programmatic window.scrollTo and synthetic events).
-  // Move mouse to page centre so wheel events are captured by the document.
+  // Position mouse in centre of page so mouse.wheel events are captured.
   await page.mouse.move(Math.round(viewW / 2), Math.round(viewH / 2));
-
-  // Scroll to page bottom in one fast pass to trigger all IO-based lazy loaders.
-  const { pageH: totalH } = await page.evaluate(() => ({
-    pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
-  }));
-  const WHEEL_STEP = 600;
-  const wheelSteps = Math.ceil(totalH / WHEEL_STEP);
-  for (let i = 0; i < Math.min(wheelSteps, 40); i++) {
-    await page.mouse.wheel(0, WHEEL_STEP);
-    await page.waitForTimeout(120); // brief pause per wheel tick
-  }
-  // After reaching bottom, wait for all triggered lazy images to load.
-  await page.waitForTimeout(3000);
-  await page.waitForFunction(
-    () => Array.from(document.querySelectorAll('img')).every(img => {
-      const src = img.getAttribute('src') ?? '';
-      if (!src || src.startsWith('data:')) return true;
-      return img.complete;
-    }),
-    { timeout: 10000 }
-  ).catch(() => {});
-
-  // ── Phase 2: Step-by-step scroll back through the page to sample banners ────
-  // Now that all images are loaded, scroll back to top and step down, calling
-  // detectBanners at each position to pick up all loaded images.
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(500);
 
   const { pageH } = await page.evaluate(() => ({
     pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
   }));
-  const STEP = Math.round(viewH * 0.6);
+
+  const STEP     = Math.round(viewH * 0.6);
   const MAX_STEPS = 35;
 
   for (let step = 0; step <= MAX_STEPS; step++) {
     const scrollY = step * STEP;
+
+    // 1. Snap to position with window.scrollTo (absolute, instant).
     await page.evaluate((y: number) => window.scrollTo(0, y), scrollY);
-    await page.waitForTimeout(300);
+
+    // 2. Fire a small mouse.wheel nudge — this generates a real WheelEvent which
+    //    is the only reliable trigger for Intersection Observer-based lazy loaders.
+    //    A tiny delta (1px) is enough to fire IO without meaningfully changing position.
+    await page.mouse.wheel(0, 1);
+
+    // 3. Give IO callbacks time to fire and start image fetches through the proxy.
+    await page.waitForTimeout(2500);
+
+    // 4. Wait until near-viewport images finish loading (or 7 s timeout).
+    await page.waitForFunction(
+      () => {
+        const imgs = Array.from(document.querySelectorAll('img'));
+        const nearView = imgs.filter(img => {
+          const r = img.getBoundingClientRect();
+          return r.top < window.innerHeight + 200 && r.bottom > -200;
+        });
+        return nearView.every(img => {
+          const src = img.getAttribute('src') ?? '';
+          if (!src || src.startsWith('data:')) return true;
+          return img.complete;
+        });
+      },
+      { timeout: 7000 }
+    ).catch(() => {});
+
     await addNew();
     if (scrollY + viewH >= pageH) break;
   }
 
-  // Final sweep after returning to top
+  // Final sweep — catches any stragglers that loaded after the scroll moved on.
   await addNew();
 
-  // Return to top
+  // Return to top.
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(400);
 
