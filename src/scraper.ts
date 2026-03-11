@@ -59,36 +59,39 @@ async function progressiveScrollCapture(
     }
   };
 
-  const { viewH, viewW } = await page.evaluate(() => ({
-    viewH: window.innerHeight,
+  // Capture initial state (above-fold content)
+  await addNew();
+
+  // Click centre of page to give keyboard focus — required for PageDown to work.
+  const { viewW, viewH } = await page.evaluate(() => ({
     viewW: window.innerWidth,
+    viewH: window.innerHeight,
   }));
+  await page.mouse.click(Math.round(viewW / 2), Math.round(viewH / 2)).catch(() => {});
+  await page.waitForTimeout(200);
 
-  // Position mouse in centre of page so mouse.wheel events are captured.
-  await page.mouse.move(Math.round(viewW / 2), Math.round(viewH / 2));
+  // PageDown is a native browser keyboard event — fires real scroll events AND
+  // triggers Intersection Observer callbacks. Unlike window.scrollTo + mouse.wheel,
+  // PageDown is guaranteed to fire IO because browsers treat it as user input.
+  const MAX_STEPS = 40;
 
-  const { pageH } = await page.evaluate(() => ({
-    pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
-  }));
+  for (let step = 0; step < MAX_STEPS; step++) {
+    const before = await page.evaluate(() => window.scrollY);
 
-  const STEP     = Math.round(viewH * 0.6);
-  const MAX_STEPS = 35;
+    await page.keyboard.press('PageDown');
 
-  for (let step = 0; step <= MAX_STEPS; step++) {
-    const scrollY = step * STEP;
+    // Short settle so the browser updates scroll position before we check.
+    await page.waitForTimeout(300);
 
-    // 1. Snap to position with window.scrollTo (absolute, instant).
-    await page.evaluate((y: number) => window.scrollTo(0, y), scrollY);
+    const { scrollY, pageH } = await page.evaluate(() => ({
+      scrollY: window.scrollY,
+      pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+    }));
 
-    // 2. Fire a small mouse.wheel nudge — this generates a real WheelEvent which
-    //    is the only reliable trigger for Intersection Observer-based lazy loaders.
-    //    A tiny delta (1px) is enough to fire IO without meaningfully changing position.
-    await page.mouse.wheel(0, 1);
+    // Give IO callbacks time to fire and lazy images to fetch through the proxy.
+    await page.waitForTimeout(2200);
 
-    // 3. Give IO callbacks time to fire and start image fetches through the proxy.
-    await page.waitForTimeout(2500);
-
-    // 4. Wait until near-viewport images finish loading (or 7 s timeout).
+    // Wait until near-viewport images finish loading (or 7 s timeout).
     await page.waitForFunction(
       () => {
         const imgs = Array.from(document.querySelectorAll('img'));
@@ -106,7 +109,9 @@ async function progressiveScrollCapture(
     ).catch(() => {});
 
     await addNew();
-    if (scrollY + viewH >= pageH) break;
+
+    // Stop when we've reached the bottom (scroll didn't move or viewport covers rest)
+    if (scrollY <= before || scrollY + viewH >= pageH) break;
   }
 
   // Final sweep — catches any stragglers that loaded after the scroll moved on.
