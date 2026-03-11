@@ -62,13 +62,15 @@ async function progressiveScrollCapture(
   // Capture initial state (above-fold content)
   await addNew();
 
-  // Click centre of page to give keyboard focus — required for PageDown to work.
-  const { viewW, viewH } = await page.evaluate(() => ({
-    viewW: window.innerWidth,
-    viewH: window.innerHeight,
-  }));
-  await page.mouse.click(Math.round(viewW / 2), Math.round(viewH / 2)).catch(() => {});
-  await page.waitForTimeout(200);
+  // Give keyboard focus to the document body so PageDown scrolls the page.
+  // We use JS focus() instead of mouse.click() — clicking at centre-of-viewport
+  // could hit a banner link / promo card and trigger unwanted navigation.
+  const { viewH } = await page.evaluate(() => {
+    document.body.tabIndex = -1;
+    document.body.focus();
+    return { viewH: window.innerHeight };
+  });
+  await page.waitForTimeout(100);
 
   // PageDown is a native browser keyboard event — fires real scroll events AND
   // triggers Intersection Observer callbacks. Unlike window.scrollTo + mouse.wheel,

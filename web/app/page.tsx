@@ -489,6 +489,29 @@ function ResultCard({
   onApprove: (domain: string, item: PromptItem, idx: number, approved: boolean) => void;
   promptsLoading: boolean;
 }) {
+  const [driveState, setDriveState] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+  const [driveUrl, setDriveUrl] = useState<string>(result.driveFolderUrl ?? '');
+  const [driveError, setDriveError] = useState('');
+
+  const handleUploadToDrive = async () => {
+    setDriveState('uploading');
+    setDriveError('');
+    try {
+      const res = await fetch(`${BACKEND}/upload-to-drive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: result.domain }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Upload failed');
+      setDriveUrl(data.folderUrl);
+      setDriveState('done');
+    } catch (err) {
+      setDriveError((err as Error).message);
+      setDriveState('error');
+    }
+  };
+
   const allBanners = [...result.homepageBanners, ...result.promoBanners];
   return (
     <div className={`card overflow-hidden ${result.success ? '' : 'border-red-900/50'}`}>
@@ -513,17 +536,35 @@ function ResultCard({
               {allBanners.length} banner{allBanners.length !== 1 ? 's' : ''}
             </span>
           )}
-          {/* Drive folder link */}
-          {result.driveFolderUrl && (
-            <a
-              href={result.driveFolderUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Open Drive folder"
-              className="text-[11px] text-slate-500 hover:text-emerald-400 border border-border hover:border-emerald-800/60 px-2.5 py-1 rounded-lg transition-colors"
-            >
-              ☁ Drive
-            </a>
+          {/* Drive upload button / link */}
+          {result.success && allBanners.length > 0 && (
+            driveUrl ? (
+              <a
+                href={driveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open Drive folder"
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 border border-emerald-800/60 hover:border-emerald-600/60 px-2.5 py-1 rounded-lg transition-colors"
+              >
+                ☁ Drive ↗
+              </a>
+            ) : driveState === 'uploading' ? (
+              <span className="text-[11px] text-sky-400 flex items-center gap-1 border border-border px-2.5 py-1 rounded-lg">
+                <span className="spin text-[10px]">⟳</span> Uploading…
+              </span>
+            ) : (
+              <button
+                onClick={handleUploadToDrive}
+                title={driveState === 'error' ? driveError : 'Upload banners to Google Drive'}
+                className={`text-[11px] border px-2.5 py-1 rounded-lg transition-colors ${
+                  driveState === 'error'
+                    ? 'text-red-400 border-red-800/60 hover:border-red-600/60'
+                    : 'text-slate-400 hover:text-sky-400 border-border hover:border-sky-800/60'
+                }`}
+              >
+                {driveState === 'error' ? '⚠ Retry Drive' : '☁ Upload to Drive'}
+              </button>
+            )
           )}
           {/* Prompts loading indicator */}
           {promptsLoading && (

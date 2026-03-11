@@ -152,11 +152,9 @@ async function sendToN8n(
 
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function deliverOutput(result: ScrapeResult): Promise<void> {
-  const hasGCS   = !!process.env.GCS_BUCKET;
-  const hasN8n   = !!config.n8nWebhookUrl;
-  const hasDrive = !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID &&
-    (process.env.GOOGLE_OAUTH2_REFRESH_TOKEN || process.env.GOOGLE_SERVICE_ACCOUNT_KEY));
-  const hasWA    = !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_RECIPIENT);
+  const hasGCS = !!process.env.GCS_BUCKET;
+  const hasN8n = !!config.n8nWebhookUrl;
+  const hasWA  = !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_RECIPIENT);
 
   const allBanners = [...result.homepageBanners, ...result.promoBanners];
 
@@ -172,16 +170,11 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
     }
   }
 
-  // ── Google Drive upload ──────────────────────────────────────────────────
-  let driveResult: { folderId: string; folderUrl: string } | null = null;
-  if (hasDrive && result.success) {
-    const { uploadBannersToDrive } = await import('./drive-uploader');
-    driveResult = await uploadBannersToDrive(allBanners, result.domain);
-    if (driveResult) {
-      // Attach to result so it flows through SSE → UI
-      result.driveFolderId  = driveResult.folderId;
-      result.driveFolderUrl = driveResult.folderUrl;
-    }
+  // Google Drive upload is now manual — triggered via POST /upload-to-drive.
+
+  // ── n8n webhook ──────────────────────────────────────────────────────────
+  if (hasN8n) {
+    await sendToN8n(result, null);
   }
 
   // ── WhatsApp notification ────────────────────────────────────────────────
@@ -192,16 +185,48 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
       result.tier,
       result.geo ?? '',
       allBanners.length,
-      driveResult?.folderUrl ?? null
+      null
     );
   }
 
-  // ── n8n webhook — includes driveFolderId so n8n can run Claude Vision ────
-  if (hasN8n) {
-    await sendToN8n(result, driveResult);
+  if (!hasGCS && !hasN8n && !hasWA) {
+    console.log(`  ℹ Images saved locally to output/${result.domain}/`);
+  }
+}
+
+/** Manual Drive upload — reads banner files from output/{domain}/ and uploads.
+ *  Called by POST /upload-to-drive endpoint. */
+export async function uploadDomainToDrive(
+  domain: string
+): Promise<{ folderId: string; folderUrl: string } | null> {
+  const hasDrive = !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID &&
+    (process.env.GOOGLE_OAUTH2_REFRESH_TOKEN || process.env.GOOGLE_SERVICE_ACCOUNT_KEY));
+  if (!hasDrive) throw new Error('Google Drive is not configured on this server.');
+
+  const domainDir = path.join(config.outputDir, domain);
+  if (!fs.existsSync(domainDir)) {
+    throw new Error(`No scraped images found for ${domain}. Scrape the site first.`);
   }
 
-  if (!hasGCS && !hasDrive && !hasN8n && !hasWA) {
-    console.log(`  ℹ Images saved locally — configure GOOGLE_DRIVE_ROOT_FOLDER_ID + GOOGLE_OAUTH2_REFRESH_TOKEN to upload to Drive`);
+  // Collect all image files under output/{domain}/ (any subdirectory depth)
+  const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif']);
+  const localPaths: string[] = [];
+  function walk(dir: string) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); }
+      else if (imageExts.has(path.extname(entry.name).toLowerCase())) { localPaths.push(full); }
+    }
   }
+  walk(domainDir);
+
+  if (localPaths.length === 0) {
+    throw new Error(`No image files found in output/${domain}/. Scrape the site first.`);
+  }
+
+  // Build minimal BannerImage objects — drive-uploader only needs localPath
+  const banners = localPaths.map(localPath => ({ localPath } as import('./types').BannerImage));
+
+  const { uploadBannersToDrive } = await import('./drive-uploader');
+  return uploadBannersToDrive(banners, domain);
 }

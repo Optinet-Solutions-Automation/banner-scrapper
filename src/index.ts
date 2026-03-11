@@ -244,6 +244,32 @@ function startHttpServer(port: number) {
       return;
     }
 
+    // ── POST /upload-to-drive  (manual Drive upload for a domain) ───────────
+    if (req.method === 'POST' && rawUrl === '/upload-to-drive') {
+      const body = await readBody(req);
+      try {
+        const { domain } = JSON.parse(body) as { domain?: string };
+        if (!domain) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Body must be { "domain": "example.com" }' }));
+          return;
+        }
+        const { uploadDomainToDrive } = await import('./output');
+        const driveResult = await uploadDomainToDrive(domain);
+        if (!driveResult) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Upload returned no result — check server logs.' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ folderId: driveResult.folderId, folderUrl: driveResult.folderUrl }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: (err as Error).message }));
+      }
+      return;
+    }
+
     // ── POST /analyze-prompts — proxy to n8n, returns prompts from Claude Vision ──
     if (req.method === 'POST' && rawUrl === '/analyze-prompts') {
       const n8nUrl = config.n8nWebhookUrl;
