@@ -294,7 +294,7 @@ export async function detectBanners(
     // rendered at banner sizes (e.g. leovegas 1080×1080 squares at score≈11).
     // Promotions pages use a lower threshold (10) because promo cards in a 2-column
     // grid render at ~350-400px — just below the 14 threshold without a class boost.
-    const minScore = pageType === 'promotions' ? 12 : 14;
+    const minScore = pageType === 'promotions' ? 10 : 14;
     if (score < minScore) return;
 
     banners.push({
@@ -315,5 +315,5 @@ export async function detectBanners(
 
   return banners
     .sort((a, b) => b.score - a.score)
-    .slice(0, 30);  // top-30 candidates — promo pages can have 15-20+ individual cards
+    .slice(0, 50);  // top-50 candidates — promo pages can have 20+ individual cards
 }

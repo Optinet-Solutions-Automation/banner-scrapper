@@ -73,12 +73,27 @@ async function progressiveScrollCapture(
     const scrollY = step * STEP;
     await page.evaluate(y => window.scrollTo(0, y), scrollY);
 
-    // Fixed dwell: lazy-loaded images start at 0×0 until the proxy fetches them,
-    // so a "smart" waitForFunction that checks dimensions exits immediately
-    // (inView.length === 0 → true) before any image has loaded.
-    // A guaranteed 3.5 s pause at each viewport position is simpler and reliable.
-    // 3.5s covers borderline proxy latency including Cloud Run cold-start overhead.
-    await page.waitForTimeout(3500);
+    // Minimum dwell so lazy images start their fetch request.
+    await page.waitForTimeout(1500);
+
+    // Smart wait: keep polling until all visible <img> elements with a real src
+    // have finished loading (naturalWidth > 0). Handles slow proxy fetches.
+    // Falls through after 6 s so we never stall forever on a broken image.
+    await page.waitForFunction(
+      () => {
+        const imgs = Array.from(document.querySelectorAll('img'));
+        const inView = imgs.filter(img => {
+          const r = img.getBoundingClientRect();
+          return r.top < window.innerHeight && r.bottom > 0 && r.width > 50 && r.height > 50;
+        });
+        if (inView.length === 0) return true;
+        return inView.every(img => {
+          const src = img.getAttribute('src') ?? '';
+          return !src || src.startsWith('data:') || img.naturalWidth > 0;
+        });
+      },
+      { timeout: 6000 }
+    ).catch(() => {});
 
     await addNew();
 
