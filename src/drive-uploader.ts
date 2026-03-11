@@ -16,39 +16,11 @@ import { google, drive_v3 } from 'googleapis';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import sharp from 'sharp';
 import { BannerImage } from './types';
+import { aHash, isSimilar } from './phash';
 
 function md5(filePath: string): string {
   return crypto.createHash('md5').update(fs.readFileSync(filePath)).digest('hex');
-}
-
-/** Average Hash (aHash) — resize to 8×8 greyscale, return 64-char binary string. */
-async function aHash(filePath: string): Promise<string> {
-  try {
-    const pixels = await sharp(filePath)
-      .resize(8, 8, { fit: 'fill' })
-      .greyscale()
-      .raw()
-      .toBuffer();
-    const avg = pixels.reduce((s, v) => s + v, 0) / pixels.length;
-    return Array.from(pixels).map(v => (v >= avg ? '1' : '0')).join('');
-  } catch {
-    return '';
-  }
-}
-
-/** Hamming distance between two binary strings. */
-function hammingDistance(a: string, b: string): number {
-  if (a.length !== b.length || a.length === 0) return 999;
-  let dist = 0;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) dist++;
-  return dist;
-}
-
-/** Returns true if two hashes are visually the same (threshold = 8/64 bits). */
-function isSimilar(a: string, b: string): boolean {
-  return hammingDistance(a, b) <= 8;
 }
 
 function getMimeType(filePath: string): string {
