@@ -62,38 +62,54 @@ async function progressiveScrollCapture(
   // Capture initial state (above-fold content)
   await addNew();
 
-  // Give keyboard focus to the document body so PageDown scrolls the page.
-  // We use JS focus() instead of mouse.click() — clicking at centre-of-viewport
-  // could hit a banner link / promo card and trigger unwanted navigation.
-  const { viewH } = await page.evaluate(() => {
-    document.body.tabIndex = -1;
-    document.body.focus();
-    return { viewH: window.innerHeight };
-  });
-  await page.waitForTimeout(100);
+  // Measure viewport and identify the scroll target.
+  // Many SPAs (React/Next.js) render inside a custom overflow:auto/scroll div rather
+  // than scrolling the window — we must scroll THAT container or IO never fires for
+  // below-fold cards.
+  const { viewH, viewW } = await page.evaluate(() => ({
+    viewH: window.innerHeight,
+    viewW: window.innerWidth,
+  }));
 
-  // PageDown is a native browser keyboard event — fires real scroll events AND
-  // triggers Intersection Observer callbacks. Unlike window.scrollTo + mouse.wheel,
-  // PageDown is guaranteed to fire IO because browsers treat it as user input.
-  const MAX_STEPS = 40;
+  const STEP     = Math.round(viewH * 0.7);   // ~70 % of viewport per step
+  const MAX_STEPS = 25;
+  let noNewCount  = 0;                         // consecutive steps with no new images
+
+  // Position mouse at centre for mouse.wheel IO-trigger (avoids interactive elements
+  // like carousel arrows near the edges).
+  await page.mouse.move(Math.round(viewW / 2), Math.round(viewH / 2));
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const before = await page.evaluate(() => window.scrollY);
+    const targetY = (step + 1) * STEP;
 
-    await page.keyboard.press('PageDown');
+    // ── Scroll via JS — handles both window and custom scroll containers ──
+    await page.evaluate((y: number) => {
+      // 1. Window-level scroll (works when body is the scroll target)
+      window.scrollTo(0, y);
 
-    // Short settle so the browser updates scroll position before we check.
-    await page.waitForTimeout(300);
+      // 2. Also scroll the deepest large scrollable div — handles SPAs where
+      //    the page content lives inside an overflow:auto container and the
+      //    window itself never scrolls (window.scrollY stays 0).
+      let best: Element | null = null;
+      let bestExcess = 0;
+      for (const el of Array.from(document.querySelectorAll('*'))) {
+        if (el === document.body || el === document.documentElement) continue;
+        const s = window.getComputedStyle(el);
+        if (s.overflowY !== 'auto' && s.overflowY !== 'scroll') continue;
+        const excess = el.scrollHeight - el.clientHeight;
+        if (excess > bestExcess) { bestExcess = excess; best = el; }
+      }
+      if (best) (best as HTMLElement).scrollTop = y;
+    }, targetY);
 
-    const { scrollY, pageH } = await page.evaluate(() => ({
-      scrollY: window.scrollY,
-      pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
-    }));
+    // ── mouse.wheel nudge — fires a real WheelEvent that reliably triggers
+    //    Intersection Observer callbacks for elements that just entered view.
+    await page.mouse.wheel(0, 2);
 
-    // Give IO callbacks time to fire and lazy images to fetch through the proxy.
-    await page.waitForTimeout(2200);
+    // Give IO callbacks and proxy image fetches time to complete.
+    await page.waitForTimeout(2500);
 
-    // Wait until near-viewport images finish loading (or 7 s timeout).
+    // Wait until near-viewport images have finished loading (or 7 s timeout).
     await page.waitForFunction(
       () => {
         const imgs = Array.from(document.querySelectorAll('img'));
@@ -110,13 +126,44 @@ async function progressiveScrollCapture(
       { timeout: 7000 }
     ).catch(() => {});
 
+    const countBefore = collected.length;
     await addNew();
 
-    // Stop when we've reached the bottom (scroll didn't move or viewport covers rest)
-    if (scrollY <= before || scrollY + viewH >= pageH) break;
+    if (collected.length === countBefore) {
+      noNewCount++;
+    } else {
+      noNewCount = 0;
+    }
+
+    // Termination: either reached the end of the page, or 4 consecutive steps
+    // with no new images (handles pages that stop yielding content mid-scroll).
+    const { pageH } = await page.evaluate(() => ({
+      pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+    }));
+    if (targetY + viewH >= pageH || noNewCount >= 4) break;
   }
 
-  // Final sweep — catches any stragglers that loaded after the scroll moved on.
+  // ── Force-load pass ─────────────────────────────────────────────────────
+  // Some lazy loaders use data-src attributes and only swap to real src after a
+  // library (e.g. lazysizes) detects visibility. If images are in the DOM but
+  // still have data-src / loading="lazy", copy data-src → src directly.
+  const forcedCount = await page.evaluate(() => {
+    let n = 0;
+    for (const img of Array.from(document.querySelectorAll('img')) as HTMLImageElement[]) {
+      const dataSrc = img.getAttribute('data-src') || img.getAttribute('data-lazy')
+                   || img.getAttribute('data-original') || '';
+      if (dataSrc && (!img.src || img.src.startsWith('data:') || img.src === window.location.href)) {
+        img.src = dataSrc; n++;
+      }
+      if (img.loading === 'lazy') { img.loading = 'eager'; }
+    }
+    return n;
+  });
+  if (forcedCount > 0) {
+    await page.waitForTimeout(3000);
+  }
+
+  // Final sweep — catches anything loaded during the force-load pass.
   await addNew();
 
   // Return to top.
