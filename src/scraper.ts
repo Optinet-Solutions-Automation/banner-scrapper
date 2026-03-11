@@ -83,15 +83,14 @@ async function progressiveScrollCapture(
     const targetY = (step + 1) * STEP;
 
     // ── Scroll via JS — handles both window and custom scroll containers ──
-    const { windowScrollY, containerScrollTop, pageH } = await page.evaluate((y: number) => {
-      // 1. Window-level scroll (works when body is the scroll target)
+    const { windowScrollY, docScrollTop, containerScrollTop, pageH: pageHBefore } = await page.evaluate((y: number) => {
+      // 1. Window-level scroll (all known variants)
       window.scrollTo({ top: y, behavior: 'instant' as ScrollBehavior });
-      document.documentElement.scrollTop = y;  // works on some sites where window.scrollTo fails
-      document.body.scrollTop = y;             // legacy fallback
+      document.documentElement.scrollTop = y;
+      document.body.scrollTop = y;
 
-      // 2. Also scroll the deepest large scrollable div — handles SPAs.
-      //    Extended search: include overflow:hidden containers with large content
-      //    (some scroll libraries use overflow:hidden + transform instead of overflow:scroll).
+      // 2. Find and scroll the deepest container with excess scrollable content
+      //    (extended: any overflow value, not just auto/scroll)
       let best: Element | null = null;
       let bestExcess = 0;
       for (const el of Array.from(document.querySelectorAll('*'))) {
@@ -101,26 +100,34 @@ async function progressiveScrollCapture(
       }
       if (best) (best as HTMLElement).scrollTop = y;
 
-      // 3. Dispatch scroll events for jQuery lazyload and similar event-based loaders.
-      //    jQuery lazyload listens to window 'scroll' — dispatching this manually
-      //    triggers the visibility check even when the actual scrollY doesn't change.
+      // 3. Dispatch native scroll events for Intersection Observer + event listeners
       window.dispatchEvent(new Event('scroll', { bubbles: true }));
       document.dispatchEvent(new Event('scroll', { bubbles: true }));
       if (best) best.dispatchEvent(new Event('scroll', { bubbles: true }));
 
+      // 4. jQuery scroll trigger — jQuery plugins (.lazyload, slick, etc.) bind
+      //    via $.fn.on('scroll') which sometimes doesn't fire on native dispatchEvent.
+      //    Calling $(window).trigger('scroll') goes through jQuery's own event system.
+      const jq = (window as any).jQuery || (window as any).$;
+      if (jq && typeof jq.fn !== 'undefined') {
+        try { jq(window).trigger('scroll'); }   catch {}
+        try { jq(document).trigger('scroll'); } catch {}
+        if (best) try { jq(best).trigger('scroll'); } catch {}
+      }
+
       return {
         windowScrollY: window.scrollY,
+        docScrollTop:  document.documentElement.scrollTop,
         containerScrollTop: best ? (best as HTMLElement).scrollTop : -1,
         pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
       };
     }, targetY);
 
-    // ── mouse.wheel — fires a real WheelEvent for Intersection Observer.
-    //    Use a large delta (= step size) so the browser physically scrolls
-    //    the focused element even when window.scrollTo is blocked.
-    await page.mouse.wheel(0, STEP);
+    // ── Physical scroll events (browser-native, cannot be prevented by JS) ──
+    await page.mouse.wheel(0, STEP);   // large WheelEvent delta
+    await page.keyboard.press('PageDown'); // moves focused element's scroll container
 
-    // Give IO callbacks and proxy image fetches time to complete.
+    // Give IO callbacks, jQuery lazy handlers, and proxy image fetches time to run.
     await page.waitForTimeout(2500);
 
     // Wait until near-viewport images have finished loading (or 7 s timeout).
@@ -140,25 +147,29 @@ async function progressiveScrollCapture(
       { timeout: 7000 }
     ).catch(() => {});
 
+    // Read pageH AFTER the wait — AJAX pagination may have added new rows during the dwell.
+    // (Reading it before the wait gives stale data and pageHGrew was always false.)
+    const pageHAfter = await page.evaluate(() =>
+      Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)
+    );
+
     const countBefore = collected.length;
-    const prevPageH = pageH;
     await addNew();
 
-    const pageHGrew = pageH > prevPageH + 100; // new AJAX content loaded into DOM
+    const pageHGrew = pageHAfter > pageHBefore + 100;
     if (collected.length === countBefore && !pageHGrew) {
       noNewCount++;
     } else {
-      noNewCount = 0; // reset — new banners found OR page grew (more content incoming)
+      noNewCount = 0; // reset — new banners found OR AJAX added new rows
     }
 
     // Debug: emit per-step info to terminal
     emitProgress({ type: 'progress', domain: '', message:
-      `Scroll step ${step + 1}: target=${targetY} win=${windowScrollY} cont=${containerScrollTop} pageH=${pageH} imgs=${collected.length} noNew=${noNewCount}` });
+      `Scroll step ${step + 1}: target=${targetY} win=${windowScrollY} doc=${docScrollTop} cont=${containerScrollTop} pageH=${pageHBefore}→${pageHAfter} imgs=${collected.length} noNew=${noNewCount}` });
 
-    // Only early-exit when we've covered ≥80% of the page AND had 6 empty steps.
-    // Never exit at <50% of page — some promo grids stack below a tall hero section.
-    const pctCovered = (targetY + viewH) / pageH;
-    if (targetY + viewH >= pageH || (noNewCount >= 6 && pctCovered >= 0.8)) break;
+    // Only early-exit when we've covered ≥80% of the (possibly grown) page AND had 6 empty steps.
+    const pctCovered = (targetY + viewH) / pageHAfter;
+    if (targetY + viewH >= pageHAfter || (noNewCount >= 6 && pctCovered >= 0.8)) break;
   }
 
   // ── Force-load pass ─────────────────────────────────────────────────────
