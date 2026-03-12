@@ -59,6 +59,31 @@ async function progressiveScrollCapture(
     }
   };
 
+  // ── Tall-viewport trick for promo pages ──────────────────────────────────────
+  // Many casino promo pages use IntersectionObserver-based lazy loading. If the
+  // viewport is only ~900px tall, IO never fires for cards in rows 3-4.
+  // Fix: expand the viewport to the full page height so ALL elements are
+  // in-viewport on load, forcing every IO callback to fire immediately.
+  const { viewW: initialW, pageH: initialPageH } = await page.evaluate(() => ({
+    viewW: window.innerWidth,
+    pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+  }));
+  const tallH = Math.max(initialPageH + 400, 3000); // at least 3000px
+  await page.setViewportSize({ width: initialW || 1440, height: tallH });
+  // Wait for any newly-in-viewport images to load
+  await page.waitForTimeout(2500);
+  await page.waitForFunction(
+    () => {
+      const imgs = Array.from(document.querySelectorAll('img')) as HTMLImageElement[];
+      const inView = imgs.filter(img => {
+        const r = img.getBoundingClientRect();
+        return r.width > 50 && !img.complete;
+      });
+      return inView.length === 0;
+    },
+    { timeout: 8000 }
+  ).catch(() => {});
+
   // Capture initial state (above-fold content)
   await addNew();
 
