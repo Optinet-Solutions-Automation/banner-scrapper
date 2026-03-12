@@ -513,10 +513,13 @@ export async function scrapeWithTier(
         emitProgress({ type: 'progress', domain, message: `Promo raw: ${promoRaw.length} detected` });
 
         // Deduplicate within promo page, then against homepage banners.
+        // Cross-page dedup uses exact src (NOT imageKey) so that the same
+        // artwork at a DIFFERENT size (e.g. 477×196 card vs 1371×303 hero)
+        // is kept — only skip if the URL is literally identical.
         const promoDeduped1 = deduplicateByIdentity(promoRaw);
-        const homepageUrlSet = new Set(homepageDeduped.map(b => imageKey(b.src)));
-        const urlFiltered = promoDeduped1.filter(b => homepageUrlSet.has(imageKey(b.src)));
-        const promoDeduped = promoDeduped1.filter(b => !homepageUrlSet.has(imageKey(b.src)));
+        const homepageExactSet = new Set(homepageDeduped.map(b => b.src));
+        const urlFiltered = promoDeduped1.filter(b => homepageExactSet.has(b.src));
+        const promoDeduped = promoDeduped1.filter(b => !homepageExactSet.has(b.src));
         const dupCount = promoRaw.length - promoDeduped.length;
         if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} duplicate(s) (within promo or already on homepage)`);
         if (urlFiltered.length > 0) {
