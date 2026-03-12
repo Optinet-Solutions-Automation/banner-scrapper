@@ -310,6 +310,65 @@ function startHttpServer(port: number) {
       return;
     }
 
+    // ── POST /regenerate-section — regenerate one section of a prompt via Claude API ──
+    if (req.method === 'POST' && rawUrl === '/regenerate-section') {
+      const body = await readBody(req);
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured on server' }));
+        return;
+      }
+      try {
+        const { fullPrompt, sectionName, currentContent, userDescription } = JSON.parse(body);
+        const claudePrompt = `You are an expert creative director for casino/gaming promotional banner image prompts.
+
+Full current prompt:
+${fullPrompt}
+
+---
+The section to regenerate is: "${sectionName}"
+Current content of that section: "${currentContent}"
+User's guidance for the new version: "${userDescription}"
+
+Generate new content for ONLY the "${sectionName}" section. Match the depth, tone, and level of detail of the existing sections. Return ONLY the new section content — no prefix, no section name, no explanation.`;
+
+        const claudeRes = await new Promise<string>((resolve, reject) => {
+          const payload = JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 512,
+            messages: [{ role: 'user', content: claudePrompt }],
+          });
+          const req2 = https.request('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+              'content-length': Buffer.byteLength(payload),
+            },
+          }, (r) => {
+            let data = '';
+            r.on('data', c => data += c);
+            r.on('end', () => resolve(data));
+          });
+          req2.on('error', reject);
+          req2.setTimeout(30_000, () => req2.destroy(new Error('Claude API timeout')));
+          req2.write(payload);
+          req2.end();
+        });
+        const parsed = JSON.parse(claudeRes);
+        const newContent = parsed.content?.[0]?.text ?? '';
+        if (!newContent) throw new Error(parsed.error?.message ?? 'Empty response from Claude');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ newContent }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: (err as Error).message }));
+      }
+      return;
+    }
+
     // ── POST /approve-prompt — records approval; forwards to Airtable webhook when configured ──
     if (req.method === 'POST' && rawUrl === '/approve-prompt') {
       const body = await readBody(req);

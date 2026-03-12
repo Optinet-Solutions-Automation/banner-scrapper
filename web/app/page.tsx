@@ -83,11 +83,56 @@ interface SiteStatus {
   result?: ScrapeResult;
 }
 
+interface PromptSection {
+  name: string;
+  content: string;
+}
+
 interface PromptItem {
   imageUrl?: string;
   bannerSrc?: string;
   prompt: string;
   page?: string;
+  sections?: PromptSection[];
+}
+
+// Parse a flat prompt string into named sections.
+// Handles: "**Section Name:**\ntext", "### Section Name\ntext", "Section Name:\ntext"
+function parsePromptSections(prompt: string): PromptSection[] {
+  const headerRe = /^(?:\*{1,2}|#{1,3}\s*)([A-Z][A-Za-z &\/]+?)(?:\*{0,2}):?\s*$/m;
+  // Split on lines that look like section headers
+  const lines = prompt.split('\n');
+  const sections: PromptSection[] = [];
+  let curName = '';
+  let curLines: string[] = [];
+
+  const flush = () => {
+    const content = curLines.join('\n').trim();
+    if (content) sections.push({ name: curName || 'Prompt', content });
+  };
+
+  for (const line of lines) {
+    const m = line.match(/^(?:\*{1,2}|#{1,3} ?)([A-Z][A-Za-z &\/\-]+?)(?:\*{0,2})\s*:?\s*$/);
+    if (m && m[1].length >= 3 && m[1].length <= 40) {
+      flush();
+      curName = m[1].trim();
+      curLines = [];
+    } else {
+      // Strip leading "**...**:" inline header from content lines
+      const inlineM = line.match(/^\*{1,2}([A-Z][A-Za-z &\/\-]+?)\*{0,2}:\s*(.*)/);
+      if (inlineM && !curName) {
+        flush();
+        curName = inlineM[1].trim();
+        curLines = [inlineM[2]];
+      } else {
+        curLines.push(line);
+      }
+    }
+  }
+  flush();
+
+  if (sections.length <= 1) return [];   // no real structure found — show flat
+  return sections;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -382,6 +427,171 @@ function BannerCard({
   );
 }
 
+// ── PromptCard — one banner prompt with section-level regeneration ─────────────
+function PromptCard({
+  domain,
+  item,
+  idx,
+  status,
+  onApprove,
+  onSectionsChange,
+}: {
+  domain: string;
+  item: PromptItem;
+  idx: number;
+  status?: 'approved' | 'rejected';
+  onApprove: (approved: boolean) => void;
+  onSectionsChange: (newSections: PromptSection[]) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  // Parse sections once (lazy) — stored in state so edits persist
+  const [sections, setSections] = useState<PromptSection[]>(() =>
+    item.sections ?? parsePromptSections(item.prompt)
+  );
+  // Per-section description inputs & loading states
+  const [descs, setDescs] = useState<Record<string, string>>({});
+  const [regenLoading, setRegenLoading] = useState<Record<string, boolean>>({});
+
+  const displayUrl = item.imageUrl || item.bannerSrc;
+  const hasSections = sections.length > 0;
+
+  // Rebuild flat prompt from sections (so copy always stays in sync)
+  const flatPrompt = hasSections
+    ? sections.map(s => `**${s.name}**\n${s.content}`).join('\n\n')
+    : item.prompt;
+
+  const copyText = () => {
+    navigator.clipboard.writeText(flatPrompt).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  };
+
+  const handleRegen = async (sectionName: string, currentContent: string) => {
+    const desc = descs[sectionName]?.trim();
+    if (!desc) return;
+    setRegenLoading(p => ({ ...p, [sectionName]: true }));
+    try {
+      const res = await fetch(`${BACKEND}/regenerate-section`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullPrompt: flatPrompt,
+          sectionName,
+          currentContent,
+          userDescription: desc,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Regeneration failed');
+      const updated = sections.map(s =>
+        s.name === sectionName ? { ...s, content: data.newContent } : s
+      );
+      setSections(updated);
+      onSectionsChange(updated);
+      setDescs(p => ({ ...p, [sectionName]: '' }));
+    } catch (e) {
+      alert(`Regenerate failed: ${(e as Error).message}`);
+    } finally {
+      setRegenLoading(p => ({ ...p, [sectionName]: false }));
+    }
+  };
+
+  return (
+    <div
+      className={`rounded-xl border p-4 space-y-3 transition-colors ${
+        status === 'approved'
+          ? 'border-emerald-700/60 bg-emerald-950/20'
+          : status === 'rejected'
+          ? 'border-red-900/40 bg-red-950/10 opacity-60'
+          : 'border-border bg-surface-2'
+      }`}
+    >
+      {/* Mini banner thumbnail */}
+      {displayUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={displayUrl} alt="" className="w-full max-h-20 object-cover rounded-lg opacity-75" />
+      )}
+
+      {hasSections ? (
+        /* ── Structured sections ── */
+        <div className="space-y-4">
+          {sections.map(sec => (
+            <div key={sec.name} className="space-y-1.5">
+              {/* Section header */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-accent border-l-2 border-accent pl-2">
+                  {sec.name}
+                </span>
+              </div>
+              {/* Current content */}
+              <p className="text-[12px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap">
+                {sec.content}
+              </p>
+              {/* Description override input + regenerate button */}
+              <div className="flex gap-2 items-center mt-1">
+                <input
+                  type="text"
+                  value={descs[sec.name] ?? ''}
+                  onChange={e => setDescs(p => ({ ...p, [sec.name]: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') handleRegen(sec.name, sec.content); }}
+                  placeholder={`Describe a new ${sec.name.toLowerCase()}…`}
+                  className="flex-1 text-[11px] bg-[#07090f] border border-border rounded-lg px-3 py-1.5 text-slate-300 placeholder-slate-700 focus:outline-none focus:border-accent/60 transition-colors"
+                />
+                <button
+                  onClick={() => handleRegen(sec.name, sec.content)}
+                  disabled={!descs[sec.name]?.trim() || regenLoading[sec.name]}
+                  title="Regenerate this section"
+                  className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg border border-border hover:border-accent/60 hover:text-accent text-slate-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  {regenLoading[sec.name]
+                    ? <span className="animate-spin text-[13px]">⟳</span>
+                    : <span className="text-[13px]">↺</span>}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* ── Flat prompt (no sections detected) ── */
+        <p className="text-[12px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap">
+          {item.prompt}
+        </p>
+      )}
+
+      {/* Action row */}
+      <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-border/40">
+        <button
+          onClick={() => onApprove(true)}
+          className={`text-[11px] px-3 py-1.5 rounded-lg border font-medium transition-colors ${
+            status === 'approved'
+              ? 'bg-emerald-900/60 border-emerald-700 text-emerald-300'
+              : 'border-border hover:border-emerald-700/70 hover:text-emerald-400 text-slate-400'
+          }`}
+        >
+          {status === 'approved' ? '✓ Approved' : 'Approve'}
+        </button>
+        <button
+          onClick={() => onApprove(false)}
+          className={`text-[11px] px-3 py-1.5 rounded-lg border font-medium transition-colors ${
+            status === 'rejected'
+              ? 'bg-red-900/60 border-red-700 text-red-300'
+              : 'border-border hover:border-red-800/70 hover:text-red-400 text-slate-400'
+          }`}
+        >
+          {status === 'rejected' ? '✗ Rejected' : 'Not Approved'}
+        </button>
+        <button
+          onClick={copyText}
+          className="ml-auto text-[11px] text-slate-600 hover:text-slate-300 border border-border hover:border-border-2 px-2.5 py-1.5 rounded-lg transition-colors"
+        >
+          {copied ? '✓ Copied' : '⎘ Copy'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PromptsPanel({
   domain,
   prompts,
@@ -393,83 +603,33 @@ function PromptsPanel({
   approvalState: Record<string, 'approved' | 'rejected'>;
   onApprove: (domain: string, item: PromptItem, idx: number, approved: boolean) => void;
 }) {
-  const [copied, setCopied] = useState<number | null>(null);
-
-  const copyPrompt = (text: string, idx: number) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(idx);
-      setTimeout(() => setCopied(null), 1800);
-    });
-  };
+  const [localPrompts, setLocalPrompts] = useState<PromptItem[]>(prompts);
+  // Keep in sync if parent updates (e.g. fresh Generate Prompts)
+  useEffect(() => setLocalPrompts(prompts), [prompts]);
 
   return (
     <div className="border-t border-border bg-[#040810]/60 p-4 space-y-3">
       <div className="flex items-center gap-2 mb-1">
         <span className="section-label text-[10px]">AI Prompts</span>
-        <span className="text-[11px] text-slate-600">{prompts.length} generated</span>
+        <span className="text-[11px] text-slate-600">{localPrompts.length} generated</span>
       </div>
 
-      {prompts.map((item, i) => {
+      {localPrompts.map((item, i) => {
         const key = `${domain}::${i}`;
-        const status = approvalState[key];
-        const displayUrl = item.imageUrl || item.bannerSrc;
-
         return (
-          <div
+          <PromptCard
             key={i}
-            className={`rounded-xl border p-4 space-y-3 transition-colors ${
-              status === 'approved'
-                ? 'border-emerald-700/60 bg-emerald-950/20'
-                : status === 'rejected'
-                ? 'border-red-900/40 bg-red-950/10 opacity-60'
-                : 'border-border bg-surface-2'
-            }`}
-          >
-            {/* Mini banner thumbnail */}
-            {displayUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={displayUrl}
-                alt=""
-                className="w-full max-h-20 object-cover rounded-lg opacity-75"
-              />
-            )}
-
-            {/* Prompt text */}
-            <p className="text-[12px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap">
-              {item.prompt}
-            </p>
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => onApprove(domain, item, i, true)}
-                className={`text-[11px] px-3 py-1.5 rounded-lg border font-medium transition-colors ${
-                  status === 'approved'
-                    ? 'bg-emerald-900/60 border-emerald-700 text-emerald-300'
-                    : 'border-border hover:border-emerald-700/70 hover:text-emerald-400 text-slate-400'
-                }`}
-              >
-                {status === 'approved' ? '✓ Approved' : 'Approve'}
-              </button>
-              <button
-                onClick={() => onApprove(domain, item, i, false)}
-                className={`text-[11px] px-3 py-1.5 rounded-lg border font-medium transition-colors ${
-                  status === 'rejected'
-                    ? 'bg-red-900/60 border-red-700 text-red-300'
-                    : 'border-border hover:border-red-800/70 hover:text-red-400 text-slate-400'
-                }`}
-              >
-                {status === 'rejected' ? '✗ Rejected' : 'Not Approved'}
-              </button>
-              <button
-                onClick={() => copyPrompt(item.prompt, i)}
-                className="ml-auto text-[11px] text-slate-600 hover:text-slate-300 border border-border hover:border-border-2 px-2.5 py-1.5 rounded-lg transition-colors"
-              >
-                {copied === i ? '✓ Copied' : '⎘ Copy'}
-              </button>
-            </div>
-          </div>
+            domain={domain}
+            item={item}
+            idx={i}
+            status={approvalState[key]}
+            onApprove={(approved) => onApprove(domain, item, i, approved)}
+            onSectionsChange={(newSections) =>
+              setLocalPrompts(prev =>
+                prev.map((p, pi) => pi === i ? { ...p, sections: newSections } : p)
+              )
+            }
+          />
         );
       })}
     </div>
