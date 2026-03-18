@@ -478,6 +478,27 @@ export async function scrapeWithTier(
           { timeout: 30_000 }
         ).catch(() => {});
 
+        // Wait for page height to stabilise — promo grids often render rows
+        // incrementally (JS fetches data after hydration). We poll until the
+        // scrollHeight stops growing for 2 s, capped at 12 s total.
+        await (async () => {
+          let lastH = 0, stableMs = 0;
+          const start = Date.now();
+          while (Date.now() - start < 12_000) {
+            const h: number = await page.evaluate(
+              () => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)
+            );
+            if (h === lastH) {
+              stableMs += 500;
+              if (stableMs >= 2000) break;  // stable for 2 s → ready
+            } else {
+              lastH = h;
+              stableMs = 0;
+            }
+            await page.waitForTimeout(500);
+          }
+        })();
+
         // Progressive scroll capture: pauses at each viewport position and waits
         // for proxy-fetched lazy images to load before sampling and moving on.
         // This is the only reliable way to capture all promo cards when images
