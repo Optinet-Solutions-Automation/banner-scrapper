@@ -699,6 +699,7 @@ function ResultCard({
   };
 
   const allBanners = [...result.homepageBanners, ...result.promoBanners];
+  const includedCount = allBanners.filter(b => !excludedSrcs.has(b.src)).length;
   return (
     <div className={`card overflow-hidden ${result.success ? '' : 'border-red-900/50'}`}>
       {/* Header */}
