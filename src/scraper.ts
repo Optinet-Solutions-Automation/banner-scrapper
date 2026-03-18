@@ -445,13 +445,32 @@ export async function scrapeWithTier(
     await takeScreenshot(page, `tier${config.tier}_banners_found`);
     console.log(`  Found ${homepageRaw.length} homepage banner candidate(s) (carousel + below-fold)`);
 
+    // Detect layered containers (sites that stack absolute-positioned background +
+    // foreground <img> layers in one card — e.g. lokicasino37.com homepage hero).
+    const { count: hpLayeredCount, consumedSrcs: hpConsumedRaw } = await detectLayeredContainers(page, 'homepage');
+    const hpConsumedKeys = new Set(hpConsumedRaw.map(imageKey));
+    const homepageFiltered = hpConsumedKeys.size > 0
+      ? homepageRaw.filter(b => !hpConsumedKeys.has(imageKey(b.src)))
+      : homepageRaw;
+    if (hpLayeredCount > 0)
+      console.log(`  Layered homepage containers: ${hpLayeredCount} (removed ${homepageRaw.length - homepageFiltered.length} individual layer images)`);
+
     // Deduplicate within homepage: same image at multiple sizes
-    const homepageDeduped = deduplicateByIdentity(homepageRaw);
-    if (homepageDeduped.length < homepageRaw.length) {
-      console.log(`  ↩ Homepage: removed ${homepageRaw.length - homepageDeduped.length} size-duplicate(s)`);
+    const homepageDeduped = deduplicateByIdentity(homepageFiltered);
+    if (homepageDeduped.length < homepageFiltered.length) {
+      console.log(`  ↩ Homepage: removed ${homepageFiltered.length - homepageDeduped.length} size-duplicate(s)`);
     }
 
-    const homepageBanners = await downloadBanners(context, homepageDeduped, domain, 'homepage');
+    let homepageBanners = await downloadBanners(context, homepageDeduped, domain, 'homepage');
+
+    // Screenshot each layered composite and append (replaces the individual layers)
+    if (hpLayeredCount > 0) {
+      const hpComposites = await captureLayeredComposites(page, 'homepage', domain, hpLayeredCount, homepageBanners.length);
+      if (hpComposites.length > 0) {
+        homepageBanners = [...homepageBanners, ...hpComposites];
+        console.log(`  Added ${hpComposites.length} layered composite(s) for homepage`);
+      }
+    }
 
     // ── Promotions page ─────────────────────────────────────────────────────
     let promoBanners: BannerImage[] = [];
