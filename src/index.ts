@@ -248,14 +248,14 @@ function startHttpServer(port: number) {
     if (req.method === 'POST' && rawUrl === '/upload-to-drive') {
       const body = await readBody(req);
       try {
-        const { domain } = JSON.parse(body) as { domain?: string };
+        const { domain, excludedFilenames } = JSON.parse(body) as { domain?: string; excludedFilenames?: string[] };
         if (!domain) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Body must be { "domain": "example.com" }' }));
           return;
         }
         const { uploadDomainToDrive } = await import('./output');
-        const driveResult = await uploadDomainToDrive(domain);
+        const driveResult = await uploadDomainToDrive(domain, excludedFilenames ?? []);
         if (!driveResult) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Upload returned no result — check server logs.' }));
