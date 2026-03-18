@@ -406,6 +406,10 @@ export async function detectLayeredContainers(
       const w = rect.width  || (candidate as HTMLElement).offsetWidth;
       const h = rect.height || (candidate as HTMLElement).offsetHeight;
       if (w < minW || h < minH) continue;
+      // Container must have a landscape banner aspect ratio (width > height).
+      // Rejects carousel wrappers / full-page sections that have accumulated
+      // multiple stacked slides vertically (very tall portrait containers).
+      if (w / h < 1.5) continue;
 
       // Skip containers inside fixed overlays (chat widgets, cookie bars)
       let isOverlay = false;
