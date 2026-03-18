@@ -575,18 +575,39 @@ export async function scrapeWithTier(
         console.log(`  Found ${promoRaw.length} promo banner candidate(s)`);
         emitProgress({ type: 'progress', domain, message: `Promo raw: ${promoRaw.length} detected` });
 
+        // Detect layered containers — sites that build each promo card with two
+        // absolutely-positioned <img> layers (background + character cutout).
+        // Filter out the individual layer images BEFORE download, then screenshot
+        // each container as a single composed image and append to results.
+        const { count: promoLayeredCount, consumedSrcs: promoConsumedRaw } = await detectLayeredContainers(page, 'promotions');
+        const promoConsumedKeys = new Set(promoConsumedRaw.map(imageKey));
+        const promoFiltered = promoConsumedKeys.size > 0
+          ? promoRaw.filter(b => !promoConsumedKeys.has(imageKey(b.src)))
+          : promoRaw;
+        if (promoLayeredCount > 0)
+          console.log(`  Layered promo containers: ${promoLayeredCount} (removed ${promoRaw.length - promoFiltered.length} individual layer images)`);
+
         // Deduplicate within promo page only — no cross-page URL filtering.
         // Many sites reuse the same image file for both the homepage carousel
         // (large, e.g. 1463×362) and the promo grid cards (small, e.g. 348×130).
         // Removing promos that share a URL with homepage would silently drop
         // legitimate promo cards the user expects to see (e.g. FREESPINS &
         // FREEBETS, SPORT CASHOUT on goldenbet).
-        const promoDeduped = deduplicateByIdentity(promoRaw);
-        const dupCount = promoRaw.length - promoDeduped.length;
+        const promoDeduped = deduplicateByIdentity(promoFiltered);
+        const dupCount = promoFiltered.length - promoDeduped.length;
         if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} within-promo duplicate(s)`);
 
         emitProgress({ type: 'progress', domain, message: `Promo unique: ${promoDeduped.length} (after dedup)` });
         promoBanners = await downloadBanners(context, promoDeduped, domain, 'promotions');
+
+        // Screenshot layered composites and append (replaces the individual layer images)
+        if (promoLayeredCount > 0) {
+          const promoComposites = await captureLayeredComposites(page, 'promotions', domain, promoLayeredCount, promoBanners.length);
+          if (promoComposites.length > 0) {
+            promoBanners = [...promoBanners, ...promoComposites];
+            console.log(`  Added ${promoComposites.length} layered composite(s) for promo page`);
+          }
+        }
       } else {
         console.log(`  ⚠ Promo page blocked: ${promoValidation.failureReason}`);
         emitProgress({ type: 'progress', domain, message: `Promo page blocked (${promoValidation.failureReason})` });
