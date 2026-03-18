@@ -415,6 +415,11 @@ export async function scrapeWithTier(
     const belowFold = await progressiveScrollCapture(page, 'homepage', seenHomeKeys);
     homepageRaw.push(...belowFold);
 
+    // Reset viewport to standard dimensions after homepage processing.
+    // progressiveScrollCapture may have temporarily set a tall viewport to trigger IO;
+    // restoring here ensures the promo page starts with a normal scrollable viewport.
+    await page.setViewportSize({ width: 1440, height: 900 });
+
     await takeScreenshot(page, `tier${config.tier}_banners_found`);
     console.log(`  Found ${homepageRaw.length} homepage banner candidate(s) (carousel + below-fold)`);
 
