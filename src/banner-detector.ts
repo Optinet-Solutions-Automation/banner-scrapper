@@ -333,3 +333,74 @@ export async function detectBanners(
     .sort((a, b) => b.score - a.score)
     .slice(0, 50);  // top-50 candidates — promo pages can have 20+ individual cards
 }
+
+/** Detects promo/hero containers that layer multiple <img> elements absolutely
+ *  on top of each other (e.g. background scenery + character cutout overlay).
+ *  The browser composites them into one visual, but the standard detector
+ *  captures each layer separately.
+ *
+ *  Tags each qualifying container with data-bannerbot-layered="N" so
+ *  Playwright can screenshot the composed result via locator().screenshot().
+ *  Returns the count of tagged containers and the resolved src URLs of all
+ *  images inside them so callers can filter out the individual layer images.
+ */
+export async function detectLayeredContainers(
+  page: Page,
+  pageType: 'homepage' | 'promotions'
+): Promise<{ count: number; consumedSrcs: string[] }> {
+  const minW = pageType === 'promotions'
+    ? Math.round(config.minBannerWidth  * 0.6)
+    : config.minBannerWidth;
+  const minH = pageType === 'promotions'
+    ? Math.round(config.minBannerHeight * 0.6)
+    : config.minBannerHeight;
+
+  return page.evaluate(({ minW, minH }) => {
+    const consumedSrcs: string[] = [];
+    let count = 0;
+    const seenContainers = new Set<Element>();
+
+    for (const img of Array.from(document.querySelectorAll('img'))) {
+      if (window.getComputedStyle(img).position !== 'absolute') continue;
+
+      // Walk up to nearest positioned ancestor (relative / absolute / sticky)
+      let parent: Element | null = img.parentElement;
+      while (parent && parent !== document.body) {
+        const pos = window.getComputedStyle(parent).position;
+        if (pos === 'relative' || pos === 'absolute' || pos === 'sticky') break;
+        parent = parent.parentElement;
+      }
+      if (!parent || parent === document.body || seenContainers.has(parent)) continue;
+
+      // Container must have ≥2 absolutely-positioned <img> children
+      const absImgs = Array.from(parent.querySelectorAll('img')).filter(
+        i => window.getComputedStyle(i).position === 'absolute'
+      );
+      if (absImgs.length < 2) continue;
+
+      // Container must be banner-sized (use offsetWidth fallback for off-viewport elements)
+      const rect = parent.getBoundingClientRect();
+      const w = rect.width  || (parent as HTMLElement).offsetWidth;
+      const h = rect.height || (parent as HTMLElement).offsetHeight;
+      if (w < minW || h < minH) continue;
+
+      // Skip containers inside fixed overlays (chat widgets, cookie bars)
+      let isOverlay = false;
+      let anc: Element | null = parent.parentElement;
+      while (anc && anc !== document.body) {
+        if (window.getComputedStyle(anc).position === 'fixed') { isOverlay = true; break; }
+        anc = anc.parentElement;
+      }
+      if (isOverlay) continue;
+
+      seenContainers.add(parent);
+      parent.setAttribute('data-bannerbot-layered', String(++count));
+
+      for (const i of absImgs) {
+        const s = (i as HTMLImageElement).src;
+        if (s && !s.startsWith('data:') && !s.startsWith('blob:')) consumedSrcs.push(s);
+      }
+    }
+    return { count, consumedSrcs };
+  }, { minW, minH });
+}
