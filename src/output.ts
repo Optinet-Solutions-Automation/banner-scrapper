@@ -195,9 +195,11 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
 }
 
 /** Manual Drive upload — reads banner files from output/{domain}/ and uploads.
- *  Called by POST /upload-to-drive endpoint. */
+ *  Called by POST /upload-to-drive endpoint.
+ *  @param excludedFilenames - basenames to skip (e.g. ["hp_01.webp"]) */
 export async function uploadDomainToDrive(
-  domain: string
+  domain: string,
+  excludedFilenames: string[] = []
 ): Promise<{ folderId: string; folderUrl: string } | null> {
   const hasDrive = !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID &&
     (process.env.GOOGLE_OAUTH2_REFRESH_TOKEN || process.env.GOOGLE_SERVICE_ACCOUNT_KEY));
