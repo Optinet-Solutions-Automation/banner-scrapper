@@ -720,7 +720,9 @@ function ResultCard({
           )}
           {result.success && allBanners.length > 0 && (
             <span className="text-xs text-slate-400 bg-surface-3 px-2 py-0.5 rounded-full border border-border">
-              {allBanners.length} banner{allBanners.length !== 1 ? 's' : ''}
+              {excludedSrcs.size > 0
+                ? `${includedCount}/${allBanners.length} banners`
+                : `${allBanners.length} banner${allBanners.length !== 1 ? 's' : ''}`}
             </span>
           )}
           {/* Drive upload button / link */}
