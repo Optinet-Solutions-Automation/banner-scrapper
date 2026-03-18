@@ -59,27 +59,6 @@ async function progressiveScrollCapture(
     }
   };
 
-  // ── IO trigger: expand viewport briefly, then restore for normal scrolling ───
-  // Many casino promo pages use IntersectionObserver-based lazy loading.
-  // Expanding the viewport to full page height makes ALL elements technically
-  // in-viewport, firing every IO callback immediately (images start loading).
-  // We then RESTORE the original viewport so the scroll loop can work normally
-  // (a viewport taller than the page content makes window.scrollTo a no-op,
-  // which prevents the scroll loop from capturing below-fold banners).
-  const { viewW: initialW, viewH: initialH, pageH: initialPageH } = await page.evaluate(() => ({
-    viewW: window.innerWidth,
-    viewH: window.innerHeight,
-    pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
-  }));
-  if (initialPageH > initialH) {
-    // 1. Expand to full page height → IO fires for all elements
-    await page.setViewportSize({ width: initialW || 1440, height: initialPageH + 200 });
-    await page.waitForTimeout(2000);  // Give IO callbacks time to fire & set img.src
-    // 2. Restore original viewport so scroll loop works (page > viewport = scrollable)
-    await page.setViewportSize({ width: initialW || 1440, height: initialH });
-    await page.waitForTimeout(500);   // Let layout re-settle at original dimensions
-  }
-
   // Capture initial state (above-fold content)
   await addNew();
 
