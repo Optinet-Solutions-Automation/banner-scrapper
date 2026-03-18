@@ -75,9 +75,10 @@ async function progressiveScrollCapture(
   const MAX_STEPS = 30;
   let noNewCount  = 0;                         // consecutive steps with no new images
 
-  // Position mouse at centre for mouse.wheel IO-trigger (avoids interactive elements
-  // like carousel arrows near the edges).
-  await page.mouse.move(Math.round(viewW / 2), Math.round(viewH / 2));
+  // Park mouse at top-left corner — away from any interactive promo cards that
+  // could trigger hover-activated widgets (betting coupons, tooltips, etc.) which
+  // would then be captured as false-positive banner images by detectBanners().
+  await page.mouse.move(5, 5);
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const targetY = (step + 1) * STEP;
