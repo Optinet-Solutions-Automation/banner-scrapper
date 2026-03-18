@@ -373,14 +373,14 @@ function LightboxModal({
 }
 
 function BannerCard({
-  banner, domain, onOpenLightbox,
-}: { banner: BannerImage; domain: string; onOpenLightbox: () => void }) {
+  banner, domain, onOpenLightbox, onExclude, excluded,
+}: { banner: BannerImage; domain: string; onOpenLightbox: () => void; onExclude: () => void; excluded: boolean }) {
   const imgUrl = banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
   const [loaded, setLoaded] = useState(false);
   const [error, setError]   = useState(false);
 
   return (
-    <div className="group relative rounded-lg overflow-hidden border border-border hover:border-accent transition-all duration-200 bg-surface-2 cursor-pointer">
+    <div className={`group relative rounded-lg overflow-hidden border transition-all duration-200 bg-surface-2 cursor-pointer ${excluded ? 'opacity-30 border-red-900/50' : 'border-border hover:border-accent'}`}>
       {/* Page badge */}
       <span className={`absolute top-2 left-2 z-10 text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm ${
         banner.page === 'promotions'
@@ -389,6 +389,19 @@ function BannerCard({
       }`}>
         {banner.page === 'promotions' ? 'PROMO' : 'HOME'}
       </span>
+
+      {/* Exclude / restore button */}
+      <button
+        onClick={e => { e.stopPropagation(); onExclude(); }}
+        title={excluded ? 'Restore — include in Drive upload' : 'Exclude from Drive upload'}
+        className={`absolute top-1.5 right-1.5 z-20 w-5 h-5 flex items-center justify-center rounded-full text-[11px] font-bold transition-all
+          ${excluded
+            ? 'bg-red-900/80 text-red-300 border border-red-700/60 opacity-100'
+            : 'bg-black/60 text-slate-400 border border-white/10 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:border-red-700/60'
+          }`}
+      >
+        {excluded ? '↩' : '✕'}
+      </button>
 
       {/* Image — click opens lightbox */}
       <button className="block w-full text-left" onClick={onOpenLightbox}>
