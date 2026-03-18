@@ -59,37 +59,26 @@ async function progressiveScrollCapture(
     }
   };
 
-  // ── Tall-viewport trick for promo pages ──────────────────────────────────────
-  // Many casino promo pages use IntersectionObserver-based lazy loading. If the
-  // viewport is only ~900px tall, IO never fires for cards in rows 3-4.
-  // Fix: expand the viewport to the full page height so ALL elements are
-  // in-viewport on load, forcing every IO callback to fire immediately.
+  // ── IO trigger: expand viewport briefly, then restore for normal scrolling ───
+  // Many casino promo pages use IntersectionObserver-based lazy loading.
+  // Expanding the viewport to full page height makes ALL elements technically
+  // in-viewport, firing every IO callback immediately (images start loading).
+  // We then RESTORE the original viewport so the scroll loop can work normally
+  // (a viewport taller than the page content makes window.scrollTo a no-op,
+  // which prevents the scroll loop from capturing below-fold banners).
   const { viewW: initialW, viewH: initialH, pageH: initialPageH } = await page.evaluate(() => ({
     viewW: window.innerWidth,
     viewH: window.innerHeight,
     pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
   }));
-  // Expand viewport to just cover all existing DOM content (+ 200px buffer).
-  // This makes all lazy-loaded images technically in-viewport so IO fires immediately.
-  // Do NOT use an arbitrary minimum like 3000 — that forces sites into wrong
-  // responsive breakpoints and breaks their layout (fewer images render).
-  const tallH = initialPageH > initialH ? initialPageH + 200 : initialH;
-  if (tallH > initialH) {
-    await page.setViewportSize({ width: initialW || 1440, height: tallH });
+  if (initialPageH > initialH) {
+    // 1. Expand to full page height → IO fires for all elements
+    await page.setViewportSize({ width: initialW || 1440, height: initialPageH + 200 });
+    await page.waitForTimeout(2000);  // Give IO callbacks time to fire & set img.src
+    // 2. Restore original viewport so scroll loop works (page > viewport = scrollable)
+    await page.setViewportSize({ width: initialW || 1440, height: initialH });
+    await page.waitForTimeout(500);   // Let layout re-settle at original dimensions
   }
-  // Wait for any newly-in-viewport images to load
-  await page.waitForTimeout(2500);
-  await page.waitForFunction(
-    () => {
-      const imgs = Array.from(document.querySelectorAll('img')) as HTMLImageElement[];
-      const inView = imgs.filter(img => {
-        const r = img.getBoundingClientRect();
-        return r.width > 50 && !img.complete;
-      });
-      return inView.length === 0;
-    },
-    { timeout: 8000 }
-  ).catch(() => {});
 
   // Capture initial state (above-fold content)
   await addNew();
