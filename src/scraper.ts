@@ -491,8 +491,11 @@ export async function scrapeWithTier(
         // Cross-page dedup uses exact src (NOT imageKey) so that the same
         // artwork at a DIFFERENT size (e.g. 477×196 card vs 1371×303 hero)
         // is kept — only skip if the URL is literally identical.
+        // IMPORTANT: compare against homepageBanners (successfully kept), NOT
+        // homepageDeduped (raw candidates) — some candidates fail download or
+        // are filtered by score and should not block their promo counterparts.
         const promoDeduped1 = deduplicateByIdentity(promoRaw);
-        const homepageExactSet = new Set(homepageDeduped.map(b => b.src));
+        const homepageExactSet = new Set(homepageBanners.map(b => b.src));
         const urlFiltered = promoDeduped1.filter(b => homepageExactSet.has(b.src));
         const promoDeduped = promoDeduped1.filter(b => !homepageExactSet.has(b.src));
         const dupCount = promoRaw.length - promoDeduped.length;
