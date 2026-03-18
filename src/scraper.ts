@@ -23,23 +23,16 @@ function imageKey(src: string): string {
   try {
     const u = new URL(src);
     if (u.pathname.includes('/_next/image')) {
+      // Key is the underlying image path, not the resized URL
       return u.searchParams.get('url') ?? (u.origin + u.pathname);
     }
     if (u.pathname.includes('/cdn-cgi/image/')) {
+      // /cdn-cgi/image/<opts>/<source-url> → extract source-url
       const match = u.pathname.match(/\/cdn-cgi\/image\/[^/]+\/(https?:\/.+)/);
       if (match) return match[1];
     }
-    // Normalize the filename: strip size suffixes so the same artwork at different
-    // dimensions (e.g. banner-350x130.webp vs banner-700x260.webp) maps to the same key.
-    const parts = u.pathname.split('/');
-    const file  = parts.pop() ?? '';
-    const ext   = file.slice(file.lastIndexOf('.'));              // ".webp"
-    const stem  = file.slice(0, file.lastIndexOf('.'))           // "banner-350x130"
-      .replace(/-?\d{2,5}x\d{2,5}/gi, '')  // strip WxH  (-350x130, 700x260)
-      .replace(/[-_]\d{2,5}w?$/i,    '')    // strip trailing -300 / _300 / _300w
-      .replace(/[-_]+$/,             '');    // strip trailing separators
-    parts.push(stem + ext);
-    return u.origin + parts.join('/');
+    // Default: origin + pathname (strip query/hash)
+    return u.origin + u.pathname;
   } catch { return src; }
 }
 
