@@ -379,9 +379,16 @@ export async function detectLayeredContainers(
       while (el && el !== document.body && depth < 8) {
         const elPos = window.getComputedStyle(el).position;
         if (elPos !== 'static') {
-          const absImgs = Array.from(el.querySelectorAll('img')).filter(
-            i => window.getComputedStyle(i).position === 'absolute'
-          );
+          // Only count abs imgs that are themselves banner-sized (rendered or natural).
+          // This excludes tiny story circles, nav icons, etc. that happen to be
+          // positioned absolute inside a large container.
+          const absImgs = Array.from(el.querySelectorAll('img')).filter(i => {
+            if (window.getComputedStyle(i).position !== 'absolute') return false;
+            const r = i.getBoundingClientRect();
+            const iw = r.width  || (i as HTMLImageElement).naturalWidth;
+            const ih = r.height || (i as HTMLImageElement).naturalHeight;
+            return iw >= minW && ih >= minH;
+          });
           if (absImgs.length >= 2) {
             candidate = el;
             candidateAbsImgs = absImgs;
