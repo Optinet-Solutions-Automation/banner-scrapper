@@ -66,9 +66,8 @@ async function progressiveScrollCapture(
   // Many SPAs (React/Next.js) render inside a custom overflow:auto/scroll div rather
   // than scrolling the window — we must scroll THAT container or IO never fires for
   // below-fold cards.
-  const { viewH, viewW } = await page.evaluate(() => ({
+  const { viewH } = await page.evaluate(() => ({
     viewH: window.innerHeight,
-    viewW: window.innerWidth,
   }));
 
   const STEP     = Math.round(viewH * 0.7);   // ~70 % of viewport per step
