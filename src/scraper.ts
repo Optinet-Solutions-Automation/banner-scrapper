@@ -1,14 +1,17 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Page, BrowserContext } from 'playwright';
 import { TierConfig, humanDelay } from './tiers/tier-config';
 import { BannerImage, TierResult } from './types';
 import { validatePageSuccess } from './tiers/validator';
 import { dismissPopups } from './popup-handler';
 import { advanceCarousels, scrollToLoadImages, findCarouselNext, findCarouselDots, advanceCarouselOnce } from './carousel-handler';
-import { detectBanners } from './banner-detector';
+import { detectBanners, detectLayeredContainers } from './banner-detector';
 import { findPromotionsUrl } from './page-navigator';
 import { downloadBanners } from './image-downloader';
 import { takeScreenshot } from './screenshot';
 import { emitProgress } from './progress-emitter';
+import { config } from './config';
 
 // ── Deduplication helpers ────────────────────────────────────────────────────
 
