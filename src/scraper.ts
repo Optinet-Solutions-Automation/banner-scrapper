@@ -238,6 +238,55 @@ function deduplicateByIdentity<T extends { src: string; width: number; height: n
   return Array.from(best.values());
 }
 
+/** Screenshots each layered container (tagged with data-bannerbot-layered="N")
+ *  as a single composed image and saves it to the output directory.
+ *  Used when a site builds promo/hero cards by stacking multiple absolutely-
+ *  positioned <img> layers (e.g. background scenery + character cutout). */
+async function captureLayeredComposites(
+  page: Page,
+  pageType: 'homepage' | 'promotions',
+  domain: string,
+  layeredCount: number,
+  existingCount: number
+): Promise<BannerImage[]> {
+  if (layeredCount === 0) return [];
+
+  const safeDir = domain.replace(/[^a-zA-Z0-9_\-\.]/g, '_').substring(0, 80);
+  const dir = path.join(config.outputDir, safeDir, pageType);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const composites: BannerImage[] = [];
+  for (let n = 1; n <= layeredCount; n++) {
+    const loc = page.locator(`[data-bannerbot-layered="${n}"]`);
+    try {
+      await loc.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(300); // let images settle after scroll
+      const buf = await loc.screenshot({ timeout: 5000 });
+      const idx = existingCount + composites.length + 1;
+      const filepath = path.join(dir, `banner_${String(idx).padStart(2, '0')}.png`);
+      fs.writeFileSync(filepath, buf);
+      const box = await loc.boundingBox().catch(() => null);
+      const w = Math.round(box?.width  ?? 0);
+      const h = Math.round(box?.height ?? 0);
+      composites.push({
+        src:         `layered://${domain}/${pageType}/${n}`,
+        width:       w,
+        height:      h,
+        aspectRatio: h > 0 ? +(w / h).toFixed(2) : 0,
+        altText:     '',
+        context:     'layered-composite',
+        page:        pageType,
+        score:       22,
+        localPath:   filepath,
+      });
+      console.log(`    ✓ Layered composite ${n}/${layeredCount}: ${w}×${h}`);
+    } catch (err) {
+      console.warn(`    ⚠ Composite ${n}/${layeredCount} failed: ${(err as Error).message.split('\n')[0]}`);
+    }
+  }
+  return composites;
+}
+
 export interface PageScrapeResult {
   tierResult: TierResult;
   homepageBanners: BannerImage[];
