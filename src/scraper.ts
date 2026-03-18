@@ -66,7 +66,7 @@ async function progressiveScrollCapture(
     // Then restore to centre so subsequent mouse.wheel calls still fire on the
     // main scrollable area and keep triggering IntersectionObserver callbacks.
     await page.mouse.move(5, 5);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(500);
     const batch = await detectBanners(page, pageType);
     for (const b of batch) {
       const k = imageKey(b.src);
