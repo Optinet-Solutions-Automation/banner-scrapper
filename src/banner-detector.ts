@@ -363,40 +363,56 @@ export async function detectLayeredContainers(
     for (const img of Array.from(document.querySelectorAll('img'))) {
       if (window.getComputedStyle(img).position !== 'absolute') continue;
 
-      // Walk up to nearest positioned ancestor (relative / absolute / sticky)
-      let parent: Element | null = img.parentElement;
-      while (parent && parent !== document.body) {
-        const pos = window.getComputedStyle(parent).position;
-        if (pos === 'relative' || pos === 'absolute' || pos === 'sticky') break;
-        parent = parent.parentElement;
-      }
-      if (!parent || parent === document.body || seenContainers.has(parent)) continue;
+      // Walk up through ALL positioned ancestors (up to 8 levels) to find the
+      // LOWEST one that contains ≥2 absolutely-positioned <img> descendants.
+      //
+      // Why not just stop at the first positioned ancestor?
+      // Some sites (e.g. lokicasino37.com) wrap back and front images in
+      // SEPARATE immediate parents (each with only 1 abs img), but share a
+      // common grandparent that contains both. Stopping at the immediate parent
+      // gives absCount=1 and misses the composite container entirely.
+      let el: Element | null = img.parentElement;
+      let candidate: Element | null = null;
+      let candidateAbsImgs: Element[] = [];
+      let depth = 0;
 
-      // Container must have ≥2 absolutely-positioned <img> children
-      const absImgs = Array.from(parent.querySelectorAll('img')).filter(
-        i => window.getComputedStyle(i).position === 'absolute'
-      );
-      if (absImgs.length < 2) continue;
+      while (el && el !== document.body && depth < 8) {
+        const elPos = window.getComputedStyle(el).position;
+        if (elPos !== 'static') {
+          const absImgs = Array.from(el.querySelectorAll('img')).filter(
+            i => window.getComputedStyle(i).position === 'absolute'
+          );
+          if (absImgs.length >= 2) {
+            candidate = el;
+            candidateAbsImgs = absImgs;
+            break; // Take the lowest ancestor that satisfies the condition
+          }
+        }
+        el = el.parentElement;
+        depth++;
+      }
+
+      if (!candidate || seenContainers.has(candidate)) continue;
 
       // Container must be banner-sized (use offsetWidth fallback for off-viewport elements)
-      const rect = parent.getBoundingClientRect();
-      const w = rect.width  || (parent as HTMLElement).offsetWidth;
-      const h = rect.height || (parent as HTMLElement).offsetHeight;
+      const rect = candidate.getBoundingClientRect();
+      const w = rect.width  || (candidate as HTMLElement).offsetWidth;
+      const h = rect.height || (candidate as HTMLElement).offsetHeight;
       if (w < minW || h < minH) continue;
 
       // Skip containers inside fixed overlays (chat widgets, cookie bars)
       let isOverlay = false;
-      let anc: Element | null = parent.parentElement;
+      let anc: Element | null = candidate.parentElement;
       while (anc && anc !== document.body) {
         if (window.getComputedStyle(anc).position === 'fixed') { isOverlay = true; break; }
         anc = anc.parentElement;
       }
       if (isOverlay) continue;
 
-      seenContainers.add(parent);
-      parent.setAttribute('data-bannerbot-layered', String(++count));
+      seenContainers.add(candidate);
+      candidate.setAttribute('data-bannerbot-layered', String(++count));
 
-      for (const i of absImgs) {
+      for (const i of candidateAbsImgs) {
         const s = (i as HTMLImageElement).src;
         if (s && !s.startsWith('data:') && !s.startsWith('blob:')) consumedSrcs.push(s);
       }
