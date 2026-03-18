@@ -544,6 +544,37 @@ MIN_BANNER_HEIGHT=150
 
 ---
 
+## Learned Site Patterns (Baked Into the Scraper)
+
+Each time a new site reveals a new scraping challenge, the fix is added here and to the code so future runs handle it automatically. This is the self-improvement loop — every site tested makes the scraper smarter.
+
+### Layered Promotional Images (e.g. lokicasino37.com)
+**Problem**: Some sites build each promo/hero card with two `<img>` elements stacked inside a `position: relative` container — one for the background (castle, sky, scenery) and one for a character cutout positioned absolutely on top. The browser composites them into one visual, but the banner detector captured each layer separately, producing duplicate pairs.
+
+**Fix**: `detectLayeredContainers()` in `banner-detector.ts` scans for containers where ≥2 `<img>` children have `position: absolute`. It tags each qualifying container with `data-bannerbot-layered="N"`. In `scraper.ts`, `captureLayeredComposites()` then:
+1. Filters the individual layer images out of the results (before download)
+2. Screenshots each tagged container with `locator.screenshot()` — capturing the final composed visual exactly as the user sees it
+3. Saves the composite as a banner file and appends to results
+
+This is additive — if a page has no layered containers the code path is skipped entirely, so existing sites are not affected.
+
+### Betting Widget False Positives (e.g. goldenbet.com)
+**Problem**: Some sites embed betting coupon widgets (live odds tables, bet slips) as `<img>` tags inside `<p>` elements within promo card description text. These passed size filters but were not banners.
+
+**Fix**: Any `<img>` inside a `<p>` ancestor is excluded in `banner-detector.ts` (`img.closest('p')` check).
+
+### UI Overlay False Positives
+**Problem**: Chat widgets, cookie consent bars, and sticky notification overlays can render at banner-like dimensions and pass the size filter.
+
+**Fix**: Any `<img>` inside a `fixed` or `sticky` positioned ancestor is excluded in `banner-detector.ts`.
+
+### Game Tile False Positives on Promo Pages
+**Problem**: Some promotions pages include a "featured games" section below the actual promo cards. Individual game thumbnails (square, small) can pass the banner filter if their natural image dimensions are large even though they render small in a CSS grid.
+
+**Status**: Identified on lokicasino37.com. Under investigation — fix pending.
+
+---
+
 ## Development Workflow with Claude
 
 1. Claude reads this `claude.md` to understand the full project
