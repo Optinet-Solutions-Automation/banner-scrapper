@@ -11,6 +11,7 @@ const BANNER_BOOST_CLASSES = [
 // Keywords that EXCLUDE an image from being a banner
 const EXCLUSION_KEYWORDS = [
   'logo', 'icon', 'avatar', 'thumbnail', 'game-tile', 'game_tile',
+  'game__block',    // BEM game-thumb class (e.g. game__block-img on lokicasino37)
   'provider', 'badge', 'button', 'footer', 'header-logo', 'payment',
   'certification', 'flag', 'currency', 'nav', 'menu', 'sprite',
   'paymethod', 'social', 'brand', 'partner', 'software',
