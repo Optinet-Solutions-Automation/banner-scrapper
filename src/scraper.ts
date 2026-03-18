@@ -51,39 +51,29 @@ async function progressiveScrollCapture(
 ): Promise<Awaited<ReturnType<typeof detectBanners>>> {
   const collected: Awaited<ReturnType<typeof detectBanners>> = [];
 
-  // Measure viewport first so addNew() can restore mouse position after detection.
-  const { viewH, viewW } = await page.evaluate(() => ({
-    viewH: window.innerHeight,
-    viewW: window.innerWidth,
-  }));
-
-  const cx = Math.round(viewW / 2);
-  const cy = Math.round(viewH / 2);
-
   const addNew = async () => {
-    // Move mouse to top-left corner before detection so any hover-triggered
-    // popup widgets (betting coupons, tooltips, etc.) dismiss before we scan.
-    // Then restore to centre so subsequent mouse.wheel calls still fire on the
-    // main scrollable area and keep triggering IntersectionObserver callbacks.
-    await page.mouse.move(5, 5);
-    await page.waitForTimeout(500);
     const batch = await detectBanners(page, pageType);
     for (const b of batch) {
       const k = imageKey(b.src);
       if (!seenKeys.has(k)) { seenKeys.add(k); collected.push(b); }
     }
-    await page.mouse.move(cx, cy);
   };
 
   // Capture initial state (above-fold content)
   await addNew();
 
+  const { viewH, viewW } = await page.evaluate(() => ({
+    viewH: window.innerHeight,
+    viewW: window.innerWidth,
+  }));
+
   const STEP     = Math.round(viewH * 0.7);   // ~70 % of viewport per step
   const MAX_STEPS = 30;
   let noNewCount  = 0;                         // consecutive steps with no new images
 
-  // Position mouse at centre for mouse.wheel IO-trigger.
-  await page.mouse.move(cx, cy);
+  // Position mouse at centre for mouse.wheel IO-trigger (avoids interactive elements
+  // like carousel arrows near the edges).
+  await page.mouse.move(Math.round(viewW / 2), Math.round(viewH / 2));
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const targetY = (step + 1) * STEP;
