@@ -665,15 +665,28 @@ function ResultCard({
   const [driveState, setDriveState] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [driveUrl, setDriveUrl] = useState<string>(result.driveFolderUrl ?? '');
   const [driveError, setDriveError] = useState('');
+  const [excludedSrcs, setExcludedSrcs] = useState<Set<string>>(new Set());
+
+  const toggleExclude = (src: string) => {
+    setExcludedSrcs(prev => {
+      const next = new Set(prev);
+      if (next.has(src)) next.delete(src); else next.add(src);
+      return next;
+    });
+  };
 
   const handleUploadToDrive = async () => {
     setDriveState('uploading');
     setDriveError('');
+    const allBannersForUpload = [...result.homepageBanners, ...result.promoBanners];
+    const excludedFilenames = allBannersForUpload
+      .filter(b => excludedSrcs.has(b.src) && b.localPath)
+      .map(b => b.localPath!.replace(/\\/g, '/').split('/').pop()!);
     try {
       const res = await fetch(`${BACKEND}/upload-to-drive`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: result.domain }),
+        body: JSON.stringify({ domain: result.domain, excludedFilenames }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Upload failed');
