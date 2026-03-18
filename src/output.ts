@@ -212,12 +212,15 @@ export async function uploadDomainToDrive(
 
   // Collect all image files under output/{domain}/ (any subdirectory depth)
   const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif']);
+  const excluded = new Set(excludedFilenames.map(f => path.basename(f)));
   const localPaths: string[] = [];
   function walk(dir: string) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); }
-      else if (imageExts.has(path.extname(entry.name).toLowerCase())) { localPaths.push(full); }
+      else if (imageExts.has(path.extname(entry.name).toLowerCase()) && !excluded.has(entry.name)) {
+        localPaths.push(full);
+      }
     }
   }
   walk(domainDir);
