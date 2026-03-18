@@ -103,8 +103,14 @@ export async function detectBanners(
         //    (e.g. 450×107px rendered). Rendered height falls under the threshold
         //    even though the image IS a promotional banner.
         //    Use natural dims whenever the rendered size fails the threshold but the
-        //    natural image is clearly large enough to be a real banner.
-        if ((w < minW || h < minH) && img.naturalWidth >= minW && img.naturalHeight >= minH) {
+        //    natural image is clearly large enough to be a real banner AND is
+        //    landscape-shaped (naturalWidth > naturalHeight × 1.2).
+        //    This rejects square game thumbnails (e.g. 380×380) which would otherwise
+        //    pass the size check via natural dims when served at higher res through
+        //    a proxy or CDN.
+        if ((w < minW || h < minH) &&
+            img.naturalWidth >= minW && img.naturalHeight >= minH &&
+            img.naturalWidth >= img.naturalHeight * 1.2) {
           w = img.naturalWidth;
           h = img.naturalHeight;
         }
