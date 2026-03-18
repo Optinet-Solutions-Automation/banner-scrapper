@@ -111,6 +111,17 @@ export async function detectBanners(
 
         if (w < minW || h < minH) continue;
 
+        // Skip images inside fixed/sticky positioned ancestors — these are UI
+        // overlays (betting coupons, chat widgets, cookie bars) not content banners.
+        let isOverlay = false;
+        let ancestor: Element | null = img.parentElement;
+        while (ancestor && ancestor !== document.body) {
+          const pos = window.getComputedStyle(ancestor).position;
+          if (pos === 'fixed' || pos === 'sticky') { isOverlay = true; break; }
+          ancestor = ancestor.parentElement;
+        }
+        if (isOverlay) continue;
+
         // Resolve the best available src URL:
         // - If src attribute is non-empty, use browser-resolved img.src (absolute).
         // - If src="" or missing (srcset-only images like NetBet), use currentSrc
