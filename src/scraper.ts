@@ -487,24 +487,17 @@ export async function scrapeWithTier(
         console.log(`  Found ${promoRaw.length} promo banner candidate(s)`);
         emitProgress({ type: 'progress', domain, message: `Promo raw: ${promoRaw.length} detected` });
 
-        // Deduplicate within promo page, then against homepage banners.
-        // Cross-page dedup uses exact src (NOT imageKey) so that the same
-        // artwork at a DIFFERENT size (e.g. 477×196 card vs 1371×303 hero)
-        // is kept — only skip if the URL is literally identical.
-        // IMPORTANT: compare against homepageBanners (successfully kept), NOT
-        // homepageDeduped (raw candidates) — some candidates fail download or
-        // are filtered by score and should not block their promo counterparts.
-        const promoDeduped1 = deduplicateByIdentity(promoRaw);
-        const homepageExactSet = new Set(homepageBanners.map(b => b.src));
-        const urlFiltered = promoDeduped1.filter(b => homepageExactSet.has(b.src));
-        const promoDeduped = promoDeduped1.filter(b => !homepageExactSet.has(b.src));
+        // Deduplicate within promo page only — no cross-page URL filtering.
+        // Many sites reuse the same image file for both the homepage carousel
+        // (large, e.g. 1463×362) and the promo grid cards (small, e.g. 348×130).
+        // Removing promos that share a URL with homepage would silently drop
+        // legitimate promo cards the user expects to see (e.g. FREESPINS &
+        // FREEBETS, SPORT CASHOUT on goldenbet).
+        const promoDeduped = deduplicateByIdentity(promoRaw);
         const dupCount = promoRaw.length - promoDeduped.length;
-        if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} duplicate(s) (within promo or already on homepage)`);
-        if (urlFiltered.length > 0) {
-          emitProgress({ type: 'progress', domain, message: `URL-deduped away: ${urlFiltered.map(b => `${b.width}×${b.height}`).join(', ')}` });
-        }
+        if (dupCount > 0) console.log(`  ↩ Skipped ${dupCount} within-promo duplicate(s)`);
 
-        emitProgress({ type: 'progress', domain, message: `Promo unique: ${promoDeduped.length} (after URL dedup vs homepage)` });
+        emitProgress({ type: 'progress', domain, message: `Promo unique: ${promoDeduped.length} (after dedup)` });
         promoBanners = await downloadBanners(context, promoDeduped, domain, 'promotions');
       } else {
         console.log(`  ⚠ Promo page blocked: ${promoValidation.failureReason}`);
