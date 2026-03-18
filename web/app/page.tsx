@@ -782,6 +782,8 @@ function ResultCard({
               banner={b}
               domain={result.domain}
               onOpenLightbox={() => onOpenLightbox(b, result.domain)}
+              onExclude={() => toggleExclude(b.src)}
+              excluded={excludedSrcs.has(b.src)}
             />
           ))}
         </div>
