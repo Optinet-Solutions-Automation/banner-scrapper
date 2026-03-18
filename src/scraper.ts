@@ -64,12 +64,19 @@ async function progressiveScrollCapture(
   // viewport is only ~900px tall, IO never fires for cards in rows 3-4.
   // Fix: expand the viewport to the full page height so ALL elements are
   // in-viewport on load, forcing every IO callback to fire immediately.
-  const { viewW: initialW, pageH: initialPageH } = await page.evaluate(() => ({
+  const { viewW: initialW, viewH: initialH, pageH: initialPageH } = await page.evaluate(() => ({
     viewW: window.innerWidth,
+    viewH: window.innerHeight,
     pageH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
   }));
-  const tallH = Math.max(initialPageH + 400, 3000); // at least 3000px
-  await page.setViewportSize({ width: initialW || 1440, height: tallH });
+  // Expand viewport to just cover all existing DOM content (+ 200px buffer).
+  // This makes all lazy-loaded images technically in-viewport so IO fires immediately.
+  // Do NOT use an arbitrary minimum like 3000 — that forces sites into wrong
+  // responsive breakpoints and breaks their layout (fewer images render).
+  const tallH = initialPageH > initialH ? initialPageH + 200 : initialH;
+  if (tallH > initialH) {
+    await page.setViewportSize({ width: initialW || 1440, height: tallH });
+  }
   // Wait for any newly-in-viewport images to load
   await page.waitForTimeout(2500);
   await page.waitForFunction(
