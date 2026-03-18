@@ -111,8 +111,13 @@ export async function detectBanners(
 
         if (w < minW || h < minH) continue;
 
-        // Skip images inside fixed/sticky positioned ancestors — these are UI
-        // overlays (betting coupons, chat widgets, cookie bars) not content banners.
+        // Skip images inside <p> tags — those are editorial/body-text images
+        // (e.g. betting coupon widgets embedded in promo card descriptions),
+        // never promotional banners.
+        if (img.closest('p')) continue;
+
+        // Skip images inside fixed/sticky positioned ancestors — UI overlays
+        // (chat widgets, cookie bars) not content banners.
         let isOverlay = false;
         let ancestor: Element | null = img.parentElement;
         while (ancestor && ancestor !== document.body) {
