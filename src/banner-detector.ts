@@ -133,6 +133,27 @@ export async function detectBanners(
         }
         if (isOverlay) continue;
 
+        // Skip game thumbnails — images inside casino game-grid / game-slider
+        // sections.  Game tile covers are square (or near-square) and render
+        // inside containers with characteristic "game-*" class names.  They are
+        // NOT promotional banners even if their natural dimensions are large.
+        let isGameTile = false;
+        let gAnc: Element | null = img.parentElement;
+        for (let gd = 0; gd < 8 && gAnc && gAnc !== document.body; gd++, gAnc = gAnc.parentElement) {
+          const cls = ((gAnc as HTMLElement).className || '').toString().toLowerCase();
+          if (
+            cls.includes('game-slider')  ||  // game-slider__item, game-slider-wrap
+            cls.includes('game-grid')    ||  // game-grid, game-grid__item
+            cls.includes('game-list')    ||  // game-list, game-list__item
+            cls.includes('game-lobby')   ||  // game-lobby, game-lobby__grid
+            cls.includes('game__block')  ||  // game__block-img (BEM game thumb)
+            cls.includes('games-section') || // games section wrapper
+            cls.includes('casino-games') || // casino-games catalog
+            cls.includes('winners-slider')   // recent winners / game highlights
+          ) { isGameTile = true; break; }
+        }
+        if (isGameTile) continue;
+
         // Resolve the best available src URL:
         // - If src attribute is non-empty, use browser-resolved img.src (absolute).
         // - If src="" or missing (srcset-only images like NetBet), use currentSrc
