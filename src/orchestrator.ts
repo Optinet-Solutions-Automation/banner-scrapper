@@ -170,7 +170,79 @@ export async function scrapeSite(url: string, geoOverride?: string): Promise<Scr
         continue;  // move to next tier
       }
 
-      // ── Standard tiers (1, 2, 4) ─────────────────────────────────────────────
+      // ── Residential proxy tier: geo cycling (same logic as datacenter) ──────────
+      if (tierCfg.proxy === 'residential') {
+        const resGeoOrder = config.resProxy.geoCountries.map(g => g.toLowerCase());
+        const geosToTry   = preferredGeo ? [preferredGeo] : resGeoOrder;
+        let tier4Succeeded = false;
+
+        geoLoop4: for (const geo of geosToTry) {
+          config.resProxy.geo = geo;
+          if (geosToTry.length > 1) {
+            console.log(`  [Auto-geo] Trying ${geo.toUpperCase()}…`);
+            emitProgress({ type: 'geo_try', domain, tier, geo, message: `Trying geo: ${geo.toUpperCase()}` });
+          }
+
+          for (let attempt = 1; attempt <= tierCfg.retries; attempt++) {
+            if (attempt > 1) console.log(`  Retry ${attempt}/${tierCfg.retries}`);
+
+            const { browser, context } = await launchBrowser(tierCfg, attempt - 1);
+            try {
+              const pageResult = await scrapeWithTier(url, domain, context, tierCfg);
+
+              if (pageResult.tierResult.success) {
+                if (pageResult.homepageBanners.length === 0 && geosToTry.length > 1) {
+                  if (attempt < tierCfg.retries) {
+                    console.log(`  ⚠ 0 banners at ${geo.toUpperCase()} — retrying same geo (attempt ${attempt}/${tierCfg.retries})`);
+                    emitProgress({ type: 'progress', domain, message: `0 banners at ${geo.toUpperCase()} — retrying` });
+                    continue;
+                  }
+                  console.log(`  ⚠ 0 banners at ${geo.toUpperCase()} after ${attempt} attempts — trying next geo`);
+                  emitProgress({ type: 'progress', domain, message: `0 banners at ${geo.toUpperCase()} — trying next geo` });
+                  break;
+                }
+
+                result.tier            = tier;
+                result.geo             = geo;
+                result.homepageBanners = pageResult.homepageBanners;
+                result.promoBanners    = pageResult.promoBanners;
+                result.success         = true;
+
+                saveSiteMemory(domain, {
+                  lastSuccessfulTier: tier,
+                  lastScraped:        new Date().toISOString(),
+                  workingGeo:         geo,
+                });
+
+                console.log(`\n✅ SUCCESS — Tier ${tier} (${geo.toUpperCase()}) | ${result.homepageBanners.length} homepage + ${result.promoBanners.length} promo banners`);
+                await deliverOutput(result);
+                emitProgress({ type: 'site_done', domain, result });
+                tier4Succeeded = true;
+                return result;
+              }
+
+              const reason = pageResult.tierResult.failureReason;
+              console.log(`  ✗ Tier ${tier} (${geo.toUpperCase()}) failed: ${reason}`);
+              emitProgress({ type: 'tier_fail', domain, tier, geo, reason: reason as string });
+
+              if (TIER_ESCALATE.has(reason)) break geoLoop4;
+              if (GEO_SENSITIVE.has(reason))  break; // try next geo
+
+            } finally {
+              await context.close().catch(() => {});
+              await browser.close().catch(() => {});
+            }
+          }
+        }
+
+        if (!tier4Succeeded) {
+          emitProgress({ type: 'progress', domain, message: `Tier ${tier} exhausted all geos` });
+          console.log(`  → All Tier ${tier} geos exhausted`);
+        }
+        continue;
+      }
+
+      // ── Standard tiers (1, 2) — no proxy, no geo cycling ─────────────────────
       let attempt = 0;
       while (attempt < tierCfg.retries) {
         attempt++;
@@ -181,36 +253,26 @@ export async function scrapeSite(url: string, geoOverride?: string): Promise<Scr
           const pageResult = await scrapeWithTier(url, domain, context, tierCfg);
 
           if (pageResult.tierResult.success) {
-            // Page loaded but 0 banners — geo-targeted content from this IP.
-            // Escalate so Tier 3 can try with a proxy/different exit country.
+            // Page loaded but 0 banners — escalate so proxy tiers can try different IPs.
             if (pageResult.homepageBanners.length === 0 && tier < maxTier) {
               console.log(`  ⚠ 0 banners found at Tier ${tier} — escalating for geo diversity`);
               emitProgress({ type: 'progress', domain, message: `0 banners at Tier ${tier} — escalating` });
-              break; // break attempt loop → outer for-loop moves to tier+1
+              break;
             }
 
             result.tier            = tier;
-            // For residential proxy (Tier 4), report the residential geo — NOT the
-            // datacenter geo (which is left over from Tier 3's geo loop and is wrong).
-            result.geo = tierCfg.proxy === 'residential'
-              ? (config.resProxy.geo || undefined)
-              : (config.dcProxy.geo || undefined);
+            result.geo             = config.dcProxy.geo || undefined;
             result.homepageBanners = pageResult.homepageBanners;
             result.promoBanners    = pageResult.promoBanners;
             result.success         = true;
 
-            // Save the working geo for Tier 4 so next run uses the correct residential geo.
-            // For non-proxy tiers (1, 2) preserve any existing stored geo unchanged.
-            const workingGeoToSave = tierCfg.proxy === 'residential'
-              ? (config.resProxy.geo || savedEntry?.workingGeo)
-              : savedEntry?.workingGeo;
             saveSiteMemory(domain, {
               lastSuccessfulTier: tier,
               lastScraped:        new Date().toISOString(),
-              workingGeo:         workingGeoToSave,
+              workingGeo:         savedEntry?.workingGeo,
             });
 
-            console.log(`\n✅ SUCCESS — Tier ${tier}${result.geo ? ` (${result.geo.toUpperCase()})` : ''} | ${result.homepageBanners.length} homepage + ${result.promoBanners.length} promo banners`);
+            console.log(`\n✅ SUCCESS — Tier ${tier} | ${result.homepageBanners.length} homepage + ${result.promoBanners.length} promo banners`);
             await deliverOutput(result);
             emitProgress({ type: 'site_done', domain, result });
             return result;
