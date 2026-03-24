@@ -16,6 +16,9 @@ output/
 temp_screenshots/
 *.png
 
+# Temp directory — contains cloudrun-env.yaml with proxy credentials (never commit)
+.tmp/
+
 # Site memory (persisted in GCS, not in repo)
 sites.json
 

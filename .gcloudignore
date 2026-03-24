@@ -1,0 +1,26 @@
+# Files to exclude from gcloud builds submit source archive
+# Based on .gitignore but deliberately keeps .tmp/cloudrun-env.yaml
+# so Cloud Build can read env vars during deployment.
+
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+output/
+temp_screenshots/
+*.png
+sites.json
+.vercel/
+.DS_Store
+Thumbs.db
+
+# Exclude all of .tmp/ EXCEPT the env vars file needed by Cloud Build
+.tmp/screenshots/
+.tmp/*.png
+.tmp/*.json
+
+# Exclude web node_modules (large, not needed in Docker build)
+web/.next/
+web/node_modules/

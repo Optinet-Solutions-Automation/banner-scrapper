@@ -35,9 +35,39 @@ steps:
       - '--timeout=3600'
       - '--min-instances=0'
       - '--max-instances=1'
-      # Pass secrets as env vars — set these in Cloud Run or Secret Manager:
-      #   DC_PROXY_HOST, DC_PROXY_PORT, DC_PROXY_PROTOCOL,
-      #   DC_PROXY_USERNAME, DC_PROXY_PASSWORD, MAX_TIER
+
+  # Apply all environment variables from .tmp/cloudrun-env.yaml
+  # Uses | as delimiter (safe — none of our values contain |)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        cat > /tmp/setenv.py << 'PYEOF'
+        import subprocess
+
+        vars = {}
+        for line in open('/workspace/.tmp/cloudrun-env.yaml'):
+            line = line.strip()
+            if ':' in line and not line.startswith('#'):
+                k, _, v = line.partition(':')
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k:
+                    vars[k] = v
+
+        # Use | as delimiter so commas in values (e.g. RES_PROXY_GEO_COUNTRIES) are safe
+        pairs = '|'.join(k + '=' + v for k, v in vars.items())
+        cmd = [
+            'gcloud', 'run', 'services', 'update', 'banner-scraper',
+            '--region=us-central1',
+            '--set-env-vars=^|^' + pairs
+        ]
+        print('Setting', len(vars), 'environment variables on Cloud Run...')
+        subprocess.run(cmd, check=True)
+        print('Done.')
+        PYEOF
+        python3 /tmp/setenv.py
 
 images:
   - 'gcr.io/$PROJECT_ID/banner-scraper'
