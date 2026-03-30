@@ -6,6 +6,71 @@ An automated web scraper that extracts **banner images only** (not logos, game t
 
 **Core Principle: Progressive Escalation.** Not all sites need heavy artillery. The scraper starts with the lightest, cheapest, fastest method and only escalates to heavier methods when the current tier fails. This saves proxy costs, reduces latency, and avoids unnecessary complexity per site.
 
+- **Backend / Scraper**: Node.js 24 + TypeScript + Playwright — deployed on Google Cloud Run
+- **Frontend**: Next.js 15 (React, Tailwind) — deployed on Vercel
+- **Proxy**: Oxylabs Web Unblocker (Tier 3 datacenter) — Tier 4 residential not yet configured
+- **Storage**: Google Cloud Storage + n8n webhook (`https://automateoptinet.app.n8n.cloud/webhook/analyze`)
+- **GCP Project**: `formidable-sol-490711-f0` (sandbox@optinetsolutions.com)
+- **Cloud Run URL**: `https://banner-scraper-69452143295.us-central1.run.app`
+- **Vercel URL**: `https://banner-scrapper.vercel.app`
+- **Repo**: GitHub (auto-deploys Vercel on push)
+
+---
+
+## Summary
+
+**What this project is:** Casino banner scraper with 4-tier progressive anti-detection escalation
+**Main rule:** Only escalate proxy/stealth cost when the cheaper tier actually fails
+**Never break:** tier escalation logic, site memory, banner detection scoring, auto-geo detection
+**Always do:** auto-commit + push + Cloud Run deploy after every change, screenshot UI changes
+
+---
+
+## How the App Works
+
+```
+1. User pastes casino URL(s) into the web UI (Vercel frontend)
+   ↓
+2. Frontend streams SSE from Cloud Run backend (/scrape-stream)
+   ↓
+3. Orchestrator picks starting tier from sites.json (or Tier 1 if new site)
+   ↓
+4. Playwright loads the site → validates (no captcha/block/geo-restriction)
+   ↓
+5. If blocked → escalate to next tier (up to Tier 4)
+   ↓
+6. On success: scrape homepage banners + navigate to /promotions → scrape promo banners
+   ↓
+7. Images uploaded to Google Drive + n8n webhook triggers AI prompt analysis
+   ↓
+8. Results + thumbnails shown in web UI; site memory updated with working tier + geo
+```
+
+---
+
+## What Should NOT Change
+
+- The 4-tier escalation order and logic in `orchestrator.ts`
+- The banner scoring algorithm in `banner-detector.ts` (min score 14, SVG/GIF/portrait hard-excluded)
+- The `sites.json` schema (domain → `{ lastSuccessfulTier, workingGeo, lastScraped }`)
+- The SSE streaming protocol between frontend and backend (`/scrape-stream`)
+- The auto-geo detection order: `ca → ph → gb → au → se → in → us → de → sg → nz`
+- Google Drive folder structure: `BannerBot/{domain}/{YYYY-MM-DD_HH-MM}/hp_01.webp`
+
+---
+
+## Known Constraints
+
+- Cloud Run timeout: 3600s (set), memory: 2Gi — do not reduce
+- Cloud Run concurrency: 1 (each instance handles one scrape job — Playwright is memory-hungry)
+- Oxylabs Web Unblocker: single port 60000, protocol HTTPS, geo via username suffix
+- `MAX_TIER=3` in `.env` — Tier 4 residential proxy not yet configured (needs `RES_PROXY_*` vars)
+- 15s inter-site cooldown in `orchestrator.ts` — prevents Oxylabs rate-limiting, do not remove
+- `MIN_BANNER_WIDTH=500`, `MIN_BANNER_HEIGHT=150` — current production values
+- n8n webhook expects `{ sites: [{ domain, driveFolderId, driveFolderUrl }] }` shape
+- Google Drive uses OAuth2 refresh token (not service account) — token for hannahporter1905@gmail.com
+- Windows dev environment: use `powershell -ExecutionPolicy Bypass -Command "..."` for all shell commands
+
 ---
 
 ## Progressive Escalation Strategy (The Heart of the System)
@@ -72,6 +137,7 @@ enum FailureReason {
   BOT_DETECTED = 'bot_detected',                   // explicit "bot detected" message
   CONNECTION_REFUSED = 'connection_refused',        // network-level block
   CONTENT_MISSING = 'content_missing',             // page loaded but expected elements missing
+  HARD_BLOCKED = 'hard_blocked',                   // completely blank page — IP-level block
 }
 ```
 
@@ -84,14 +150,14 @@ async function validatePageSuccess(page: Page): Promise<TierResult> {
   const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 2000) || '');
 
   // Check for Cloudflare challenge
-  if (bodyText.includes('Checking your browser') || 
+  if (bodyText.includes('Checking your browser') ||
       bodyText.includes('cf-browser-verification') ||
       title.includes('Just a moment')) {
     return { success: false, failureReason: FailureReason.CLOUDFLARE_CHALLENGE };
   }
 
   // Check for CAPTCHA
-  if (bodyText.includes('captcha') || 
+  if (bodyText.includes('captcha') ||
       await page.$('iframe[src*="captcha"]') ||
       await page.$('.g-recaptcha, .h-captcha')) {
     return { success: false, failureReason: FailureReason.CAPTCHA_DETECTED };
@@ -104,19 +170,34 @@ async function validatePageSuccess(page: Page): Promise<TierResult> {
   }
 
   // Check for bot detection
-  if (bodyText.match(/bot.*detected/i) || 
+  if (bodyText.match(/bot.*detected/i) ||
       bodyText.match(/automated.*access.*denied/i)) {
     return { success: false, failureReason: FailureReason.BOT_DETECTED };
   }
 
-  // Check for empty/broken page (JS didn't render)
+  // Hard block: completely blank page (IP-level, no geo cycling will help)
   const imageCount = await page.$$eval('img', imgs => imgs.length);
+  if (title === '' && bodyText.length === 0 && imageCount === 0) {
+    return { success: false, failureReason: FailureReason.HARD_BLOCKED };
+  }
+
+  // Check for empty/broken page (JS didn't render)
   if (imageCount < 3 && bodyText.length < 500) {
     return { success: false, failureReason: FailureReason.EMPTY_PAGE };
   }
 
   return { success: true };
 }
+```
+
+### Geo Failure Classification
+
+```
+GEO_SENSITIVE (try next geo, same tier):
+  geo_blocked, access_denied, empty_page, content_missing, bot_detected
+
+TIER_ESCALATE (skip remaining geos, move to next tier):
+  cloudflare_challenge, captcha_detected, hard_blocked
 ```
 
 ### Tier-Specific Configurations
@@ -165,19 +246,26 @@ const TIER_CONFIGS = {
 
 ### Site Memory (Learn From Past Attempts)
 
-The system remembers which tier worked for each site so it doesn't waste time re-escalating on future runs:
+The system remembers which tier and geo worked for each site so it doesn't waste time re-escalating on future runs:
 
 ```typescript
-// sites.json stores the last successful tier per domain
+// sites.json stores the last successful tier + geo per domain
 {
-  "bet365.com": { "lastSuccessfulTier": 4, "lastScraped": "2025-03-01T..." },
-  "pokerstars.com": { "lastSuccessfulTier": 1, "lastScraped": "2025-03-01T..." },
-  "888casino.com": { "lastSuccessfulTier": 2, "lastScraped": "2025-02-28T..." }
+  "bet365.com": { "lastSuccessfulTier": 4, "workingGeo": "gb", "lastScraped": "2025-03-01T..." },
+  "leovegas.com": { "lastSuccessfulTier": 3, "workingGeo": "ca", "lastScraped": "2025-03-01T..." }
 }
 
-// On subsequent runs, START at the last known successful tier
+// On subsequent runs, START at the last known successful tier + geo
 // But periodically retry lower tiers (every 7 days) in case site changed
 ```
+
+### Auto-Geo Detection
+
+On Tier 3 for sites with no stored geo, orchestrator tries geos in order:
+`ca → ph → gb → au → se → in → us → de → sg → nz`
+
+Working geo is saved to `sites.json` as `workingGeo` field. Subsequent runs use stored geo directly.
+`--geo=XX` CLI flag and UI geo dropdown both override stored geo.
 
 ### Orchestrator Flow
 
@@ -185,7 +273,7 @@ The system remembers which tier worked for each site so it doesn't waste time re
 async function scrapeSite(url: string): Promise<ScrapeResult> {
   const domain = new URL(url).hostname;
   const siteMemory = await loadSiteMemory(domain);
-  
+
   // Start at last known tier, or tier 1 if first time
   const startTier = siteMemory?.lastSuccessfulTier ?? 1;
   // Periodically retry from tier 1 to check if lower tier works now
@@ -195,7 +283,7 @@ async function scrapeSite(url: string): Promise<ScrapeResult> {
   for (let tier = effectiveStartTier; tier <= 4; tier++) {
     const config = TIER_CONFIGS[tier];
     console.log(`[${domain}] Attempting Tier ${tier}: ${config.name}`);
-    
+
     const browser = await launchBrowser(config);
     const page = await browser.newPage();
 
@@ -205,7 +293,7 @@ async function scrapeSite(url: string): Promise<ScrapeResult> {
       await takeDebugScreenshot(page, `tier${tier}_loaded`);
 
       const validation = await validatePageSuccess(page);
-      
+
       if (!validation.success) {
         console.log(`[${domain}] Tier ${tier} failed: ${validation.failureReason}`);
         await takeDebugScreenshot(page, `tier${tier}_failed_${validation.failureReason}`);
@@ -259,17 +347,22 @@ async function scrapeSite(url: string): Promise<ScrapeResult> {
 ## Architecture
 
 ```
+Vercel (Next.js frontend)
+  └── EventSource → Cloud Run backend (port 8080)
+
 Cloud Run (Container)
+├── HTTP server (index.ts, port 8080)
 ├── Tier Orchestrator (escalation engine)
 ├── Playwright (headless Chromium)
 │   ├── Tier 1: Vanilla
-│   ├── Tier 2: + Stealth plugin
-│   ├── Tier 3: + Datacenter proxy
-│   └── Tier 4: + Residential proxy (geo-targeted)
+│   ├── Tier 2: + playwright-extra stealth plugin
+│   ├── Tier 3: + Oxylabs Web Unblocker (datacenter)
+│   └── Tier 4: + Residential proxy (geo-targeted) — not yet active
 ├── Banner detection & filtering logic
-├── Site memory (remembers which tier works per domain)
+├── Site memory (sites.json — remembers tier + geo per domain)
 ├── Screenshot system (debug + verification)
-└── Image output (Cloud Storage / webhook to n8n)
+├── Google Drive upload (OAuth2)
+└── n8n webhook output
 ```
 
 ### Why This Architecture?
@@ -291,21 +384,92 @@ Cloud Run (Container)
 | Crawlee (Apify) | Solid framework built on Playwright. Worth evaluating — handles anti-bot, retries, and proxy rotation out of the box. Strong alternative. |
 
 **Primary choice: Playwright with progressive tier escalation on Cloud Run.**
-**Strong alternative: Crawlee (built on Playwright) if you want batteries-included framework with built-in retry/proxy logic.**
 
 ---
 
 ## Tech Stack
 
-- **Runtime**: Node.js 20+ (TypeScript)
-- **Browser automation**: Playwright + `playwright-extra` + `puppeteer-extra-plugin-stealth` (loaded conditionally per tier)
-- **Proxy**: Datacenter proxy (Tier 3) + Residential proxy (Tier 4) — services like BrightData, Oxylabs, or SmartProxy
-- **Anti-detection**: Stealth plugin, random user agents, human-like delays, fingerprint spoofing (Tier 2+)
-- **Container**: Docker on Google Cloud Run
-- **Storage**: Google Cloud Storage bucket for scraped images (or direct webhook to n8n)
-- **Site memory**: JSON file in GCS or Firestore (persists which tier works per domain)
-- **Orchestration**: Cloud Scheduler (cron) or n8n trigger to invoke the scraper
-- **Language**: TypeScript for type safety and better maintainability
+- **Runtime**: Node.js 24 (TypeScript)
+- **Browser automation**: Playwright 1.51.0 + `playwright-extra` + `puppeteer-extra-plugin-stealth` (loaded conditionally per tier)
+- **Proxy (Tier 3)**: Oxylabs Web Unblocker — `unblock.oxylabs.io:60000` (HTTPS protocol)
+- **Proxy (Tier 4)**: Residential proxy — not yet configured (needs `RES_PROXY_*` env vars)
+- **Anti-detection**: Stealth plugin, Chrome-only random UAs, human-like delays, fingerprint spoofing (Tier 2+)
+- **Container**: Docker on Google Cloud Run (2Gi memory, 2 CPU, concurrency 1, timeout 3600s)
+- **Storage**: Google Drive (OAuth2, BannerBot folder) + n8n webhook
+- **Site memory**: `sites.json` in project root (persists which tier + geo works per domain)
+- **Frontend**: Next.js 15, Tailwind CSS, "Obsidian Intelligence" design system
+- **Orchestration**: n8n trigger or direct HTTP call to Cloud Run
+
+---
+
+## Key Files & Structure
+
+```
+src/
+  index.ts              Entry point — HTTP server (PORT=8080) + CLI
+  orchestrator.ts       Tier escalation engine (core logic + auto-geo)
+  scraper.ts            Per-page scrape: navigate → validate → detect → download
+  banner-detector.ts    Banner image scoring + filtering (min score 14)
+  popup-handler.ts      Cookie consent, age gates, modal dismissal
+  carousel-handler.ts   Slider/carousel interaction + lazy scroll
+  page-navigator.ts     Finds /promotions page URL
+  image-downloader.ts   Downloads banner images to output/
+  screenshot.ts         Temp screenshot capture + cleanup (10s timeout)
+  site-memory.ts        sites.json — remembers tier + geo per domain
+  progress-emitter.ts   EventEmitter for SSE real-time progress events
+  output.ts             Uploads to Google Drive + n8n webhook
+  config.ts             Env vars + paths
+  types.ts              TypeScript types
+  debug.ts              Debug script — keeps screenshots, prints all img dimensions
+  tiers/
+    tier-config.ts      TIER_CONFIGS 1-4, randomUserAgent (Chrome-only UAs)
+    browser-launcher.ts Launches browser with correct proxy/stealth config
+    validator.ts        Detects blocks: CF, captcha, geo, access_denied, bot, empty
+web/                    Next.js 15 web UI (separate package.json)
+  app/
+    layout.tsx          Root layout (Inter + JetBrains Mono fonts)
+    page.tsx            Dashboard: URL input, SSE progress, results, site memory
+    globals.css         Tailwind + "Obsidian Intelligence" design system CSS vars
+test/
+  mock-casino.html      Local test page (picsum hero + carousel banners)
+output/                 Downloaded banner images + summary.json
+sites.json              Site memory (tier + geo per domain)
+Dockerfile              Multi-stage: node:20-slim compile → playwright runtime
+cloudbuild.yaml         Cloud Run CI/CD pipeline
+```
+
+---
+
+## Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `DC_PROXY_HOST` | Oxylabs Web Unblocker host (`unblock.oxylabs.io`) |
+| `DC_PROXY_PORT` | Oxylabs port (`60000`) |
+| `DC_PROXY_PROTOCOL` | `https` |
+| `DC_PROXY_USERNAME` | Oxylabs username |
+| `DC_PROXY_PASSWORD` | Oxylabs password |
+| `DC_PROXY_GEO` | Default geo for Tier 3 (`ca`) — overridden per-site by auto-geo |
+| `RES_PROXY_HOST` | Residential proxy host (Tier 4 — not yet set) |
+| `RES_PROXY_PORT` | Residential proxy port |
+| `RES_PROXY_USERNAME` | Residential proxy username |
+| `RES_PROXY_PASSWORD` | Residential proxy password |
+| `RES_PROXY_GEO_COUNTRIES` | Allowed exit countries (e.g. `US,UK,CA,AU,NZ`) |
+| `GCS_BUCKET` | Google Cloud Storage bucket name |
+| `GCS_PROJECT_ID` | GCP project ID (`formidable-sol-490711-f0`) |
+| `GOOGLE_OAUTH2_CLIENT_ID` | OAuth2 client ID for Google Drive |
+| `GOOGLE_OAUTH2_CLIENT_SECRET` | OAuth2 client secret |
+| `GOOGLE_OAUTH2_REFRESH_TOKEN` | OAuth2 refresh token (hannahporter1905@gmail.com) |
+| `GOOGLE_DRIVE_ROOT_FOLDER_ID` | BannerBot root folder in Drive |
+| `N8N_WEBHOOK_URL` | n8n analyze webhook URL |
+| `MAX_TIER` | Max tier to escalate to (`3` — set to 4 when residential proxy configured) |
+| `TIER_RECHECK_DAYS` | Days before re-trying lower tiers (`7`) |
+| `PAGE_TIMEOUT` | Page load timeout ms (`60000`) |
+| `SCREENSHOT_ON_ERROR` | Capture screenshots on error (`true`) |
+| `DEBUG_SCREENSHOTS` | Capture debug screenshots at each step (`true`) |
+| `MIN_BANNER_WIDTH` | Minimum banner width px (`500`) |
+| `MIN_BANNER_HEIGHT` | Minimum banner height px (`150`) |
+| `NEXT_PUBLIC_BACKEND_URL` | Cloud Run URL (set in Vercel env) |
 
 ---
 
@@ -323,15 +487,18 @@ Cloud Run (Container)
 
 ### Step 2: Scrape homepage banners
 1. Identify banner images using these heuristics:
-   - **Size filtering**: Only images wider than 600px AND taller than 150px (banners are large, landscape-oriented)
+   - **Size filtering**: Only images wider than 500px AND taller than 150px (banners are large, landscape-oriented)
    - **Aspect ratio**: Width/height ratio between 1.5:1 and 5:1 (banners are wide, not square)
+   - **Score threshold**: Minimum score 14 (filters square game thumbnails scored ~11)
    - **Position**: Images in hero sections, sliders, carousels, or prominent page sections
    - **CSS class/ID hints**: Look for classes containing `banner`, `hero`, `slider`, `carousel`, `promo`, `promotion`, `featured`, `spotlight`
    - **Exclusion rules**: Skip images matching `logo`, `icon`, `avatar`, `thumbnail`, `game-tile`, `provider`, `badge`, `button`, `footer`, `header-logo`, `payment`, `certification`
+   - **Hard exclusions**: SVG, GIF, portrait AR < 0.7 — excluded with score -999
    - **Container context**: Prefer images inside `<section>`, `<div>` with banner-like classes, swiper/slick/owl containers
-2. For carousels/sliders: interact with navigation arrows or wait for auto-rotation to capture ALL slides
-3. Download each qualifying image at highest available resolution
-4. Take a **post-scrape screenshot** showing what was captured
+2. For carousels/sliders: interact with navigation arrows or wait for auto-rotation to capture ALL slides. Detect banners after EACH slide advance (not once at end) — inactive slides have naturalWidth=0 through proxy.
+3. After carousel phase: run `progressiveScrollCapture` (2.5s dwell per step) for promo sections below hero
+4. Download each qualifying image at highest available resolution
+5. Take a **post-scrape screenshot** showing what was captured
 
 ### Step 3: Navigate to Promotions page
 1. Find the promotions/bonuses page link:
@@ -351,16 +518,11 @@ Cloud Run (Container)
 5. Take a **post-scrape screenshot**
 
 ### Step 5: Output
-1. Save images with metadata:
-   - Source URL
-   - Page (homepage or promotions)
-   - Image dimensions
-   - Timestamp
-   - Alt text if available
-   - **Tier used** (for analytics on which sites need heavier methods)
-2. Upload to Cloud Storage or send via webhook to n8n
-3. Update site memory with successful tier
-4. Generate a summary report of what was scraped
+1. Save images with metadata: source URL, page (homepage/promotions), dimensions, timestamp, alt text, tier used
+2. Upload to Google Drive (`BannerBot/{domain}/{YYYY-MM-DD_HH-MM}/hp_01.webp`)
+3. Send to n8n webhook for AI prompt analysis
+4. Update site memory with successful tier + geo
+5. Generate summary report
 
 ---
 
@@ -369,16 +531,20 @@ Cloud Run (Container)
 ```
 FOR each <img>, <picture>, CSS background-image on page:
   1. Get rendered dimensions (not natural dimensions — some are CSS-scaled)
-  2. SKIP if width < 600px OR height < 150px
-  3. SKIP if aspect ratio < 1.5 or > 6.0
-  4. SKIP if src/class/id matches exclusion keywords (logo, icon, game, etc.)
-  5. BOOST score if inside banner/hero/slider/carousel container
-  6. BOOST score if image has lazy-loading attributes (important banners often lazy-load)
-  7. BOOST score if alt text contains promotional keywords
-  8. COLLECT image src, dimensions, score, context
-  
+  2. HARD EXCLUDE if SVG, GIF, or portrait AR < 0.7 → score = -999
+  3. SKIP if width < 500px OR height < 150px
+  4. SKIP if aspect ratio < 1.5 or > 6.0
+  5. SKIP if src/class/id matches exclusion keywords (logo, icon, game, etc.)
+  6. SKIP if inside a <p> ancestor (betting widgets)
+  7. SKIP if inside a fixed/sticky positioned ancestor (overlays, chat widgets)
+  8. BOOST score if inside banner/hero/slider/carousel container
+  9. BOOST score if image has lazy-loading attributes (important banners often lazy-load)
+  10. BOOST score if alt text contains promotional keywords
+  11. COLLECT image src, dimensions, score, context
+
+MINIMUM SCORE: 14 (filters game thumbnails that score ~11)
 SORT by score descending
-RETURN top N images (configurable, default: all that pass threshold)
+RETURN all images that pass threshold
 ```
 
 ---
@@ -391,7 +557,7 @@ RETURN top N images (configurable, default: all that pass threshold)
 | UA rotation | ✗ | ✓ | ✓ | ✓ |
 | Human-like delays | ✗ | ✓ | ✓ | ✓ |
 | Proxy | ✗ | ✗ | Datacenter | Residential |
-| Geo-targeting | ✗ | ✗ | ✗ | ✓ |
+| Geo-targeting | ✗ | ✗ | Auto-detect | ✓ |
 | Viewport randomization | ✗ | ✓ | ✓ | ✓ |
 | Resource blocking | ✗ | ✗ | ✓ | ✓ |
 | Mouse movement simulation | ✗ | ✗ | ✗ | ✓ |
@@ -404,19 +570,6 @@ RETURN top N images (configurable, default: all that pass threshold)
 ### Purpose
 Every major step takes a screenshot so Claude can visually inspect the page state, verify banner detection accuracy, and diagnose issues without relying on the user.
 
-### Implementation
-```typescript
-async function takeDebugScreenshot(page: Page, label: string): Promise<string> {
-  const filename = `debug_${label}_${Date.now()}.png`;
-  const filepath = path.join(SCREENSHOT_DIR, filename);
-  await page.screenshot({ fullPage: true, path: filepath });
-  // Also save a viewport-only version for quick inspection
-  const viewportFile = `debug_${label}_viewport_${Date.now()}.png`;
-  await page.screenshot({ fullPage: false, path: path.join(SCREENSHOT_DIR, viewportFile) });
-  return filepath;
-}
-```
-
 ### Screenshot Points
 | Step | Label | What Claude checks |
 |---|---|---|
@@ -428,119 +581,24 @@ async function takeDebugScreenshot(page: Page, label: string): Promise<string> {
 | After promo scrape | `tier{N}_promos_scraped` | Were promo banners captured correctly? |
 | On error | `tier{N}_error` | What went wrong? Page state at failure. |
 
-### How Claude Uses Screenshots
-When running the scraper in development:
-1. Claude executes the scraper via bash
-2. Screenshots are saved to `/home/claude/screenshots/`
-3. Claude uses the `view` tool to inspect each screenshot
-4. If something looks wrong (blocked page, missed banners, wrong images), Claude modifies the code and re-runs
-5. This loop continues until the scraping result is correct
-6. Screenshots from failed tiers help Claude understand *why* escalation was needed and whether the detection logic is working
-
----
-
-## Project Structure
-
-```
-casino-banner-scraper/
-├── src/
-│   ├── index.ts                 # Entry point, HTTP handler for Cloud Run
-│   ├── orchestrator.ts          # Tier escalation engine (core logic)
-│   ├── tiers/
-│   │   ├── tier-config.ts       # Tier definitions and settings
-│   │   ├── browser-launcher.ts  # Launches browser with tier-specific config
-│   │   └── validator.ts         # Success/failure detection after page load
-│   ├── scraper.ts               # Core banner scraping logic
-│   ├── banner-detector.ts       # Banner identification & filtering
-│   ├── page-navigator.ts        # Finds and navigates to promo pages
-│   ├── popup-handler.ts         # Cookie consent, age gates, overlay dismissal
-│   ├── carousel-handler.ts      # Slider/carousel interaction logic
-│   ├── image-downloader.ts      # Downloads and validates images
-│   ├── screenshot.ts            # Debug screenshot utility
-│   ├── site-memory.ts           # Remembers which tier works per domain
-│   ├── output.ts                # Saves to GCS or sends to n8n webhook
-│   ├── config.ts                # Configuration and environment vars
-│   └── types.ts                 # TypeScript type definitions
-├── Dockerfile                   # Cloud Run container
-├── docker-compose.yml           # Local development
-├── package.json
-├── tsconfig.json
-├── .env.example                 # Proxy credentials, GCS bucket, etc.
-├── sites.json                   # Target sites + tier memory
-├── claude.md                    # This file
-└── skills/
-    └── web-scraper/
-        └── SKILL.md             # Skill file for Claude
-```
-
----
-
-## Configuration (Environment Variables)
-
-```env
-# Datacenter Proxy (Tier 3)
-DC_PROXY_HOST=your-dc-proxy-host
-DC_PROXY_PORT=your-dc-proxy-port
-DC_PROXY_USERNAME=your-username
-DC_PROXY_PASSWORD=your-password
-
-# Residential Proxy (Tier 4)
-RES_PROXY_HOST=your-res-proxy-host
-RES_PROXY_PORT=your-res-proxy-port
-RES_PROXY_USERNAME=your-username
-RES_PROXY_PASSWORD=your-password
-RES_PROXY_GEO_COUNTRIES=US,UK,CA,AU,NZ  # comma-separated allowed exit countries
-
-# Google Cloud Storage
-GCS_BUCKET=casino-banners
-GCS_PROJECT_ID=your-project-id
-
-# n8n webhook (alternative to GCS)
-N8N_WEBHOOK_URL=https://your-n8n-instance/webhook/banner-scraper
-
-# Scraper settings
-MAX_TIER=4                  # max tier to escalate to (set to 2 to disable proxy entirely)
-TIER_RECHECK_DAYS=7         # days before re-trying lower tiers
-PAGE_TIMEOUT=60000
-SCREENSHOT_ON_ERROR=true
-DEBUG_SCREENSHOTS=true
-MIN_BANNER_WIDTH=600
-MIN_BANNER_HEIGHT=150
-```
-
----
-
-## Cloud Run Deployment
-
-### Dockerfile Key Points
-- Base image: `mcr.microsoft.com/playwright:v1.48.0-noble` (includes Chromium)
-- Install Node.js dependencies
-- Set `PLAYWRIGHT_BROWSERS_PATH` if needed
-- Memory: Allocate at least 1GB (Chromium is memory-hungry), 2GB recommended for Tier 4
-- Timeout: Set Cloud Run timeout to 300s (some sites load slowly, especially through proxies)
-- Concurrency: Set to 1 (each instance handles one scrape job at a time)
-
-### Triggering
-- **Cloud Scheduler**: Cron job hits Cloud Run HTTP endpoint with site URL(s)
-- **n8n**: HTTP request node triggers the scraper with target sites
-- **Pub/Sub**: For batch processing multiple sites
-
 ---
 
 ## Error Handling & Edge Cases
 
 - **Cloudflare challenge**: Detected by validator → escalate tier
+- **Hard block (blank page)**: Detected as `hard_blocked` → skip geo cycling, escalate tier immediately
 - **Age verification gate**: Auto-click "I am 18+" or equivalent (all tiers)
 - **Cookie consent**: Auto-dismiss cookie banners (all tiers)
-- **Geo-blocked**: Detected by validator → escalate to Tier 4 with geo-targeted proxy
+- **Geo-blocked**: Try next geo in auto-geo sequence (same tier)
 - **No promotions page**: Log and skip, still return homepage banners
-- **Infinite scroll promos**: Scroll incrementally, cap at reasonable limit
+- **Infinite scroll promos**: Scroll incrementally with 2.5s dwell per step, cap at reasonable limit
 - **WebP/AVIF images**: Convert to PNG/JPG for n8n compatibility if needed
 - **Lazy-loaded images**: Scroll to trigger loading before scraping
 - **Shadow DOM**: Check for images inside shadow roots
 - **iframes**: Check for banner images in iframes (some sites embed promos in iframes)
 - **Promo page needs higher tier**: Homepage may load on Tier 1 but promo page may be more protected. Allow per-page tier escalation within the same site.
-- **All tiers exhausted**: Flag site for manual review, include last screenshot for diagnosis
+- **All tiers exhausted**: Flag site for manual review with "Needs Tier 4 (residential proxy)" message
+- **Inter-site cooldown**: 15s delay between sites in `runScraper()` to prevent Oxylabs rate-limiting
 
 ---
 
@@ -573,19 +631,265 @@ This is additive — if a page has no layered containers the code path is skippe
 
 **Status**: Identified on lokicasino37.com. Under investigation — fix pending.
 
+### Progressive Carousel Capture
+**Problem**: Inactive carousel slides have naturalWidth=0 through proxy — capturing all slides at end missed them.
+
+**Fix**: Detect banners after EACH slide advance. Only the active slide's image actually loads.
+
+### Progressive Scroll Capture (2.5s Dwell)
+**Problem**: Lazy-loaded promo images start at 0×0. `waitForFunction` exits immediately when no in-view elements found.
+
+**Fix**: Fixed 2.5s dwell per scroll step is the only reliable approach for lazy-loaded promo grids.
+
+---
+
+## Verified Working Sites
+
+| Site | Geo | Result |
+|------|-----|--------|
+| novadreams.com | CA | Tier 3 ✅ 6 homepage |
+| betway.com | CA | Tier 3 ✅ 8-11 homepage |
+| casino.netbet.com | CA | Tier 3 ✅ 1 home + 2 promo |
+| leovegas.com | CA | Tier 3 ✅ 2 home + 1-3 promo |
+| casumo.com | CA | Tier 3 ✅ 4 home + 2 promo |
+| jackpotcity.com | CA | Tier 3 ✅ 7 homepage |
+| unibet.co.uk | GB | Tier 3 ✅ 1 homepage (CSS bg) |
+| videoslots.com | CA | Tier 3 ✅ 7 carousel banners |
+| 32red.com | GB | Tier 3 ✅ 1 homepage |
+| betsafe.com | SE | Tier 3 ✅ 1 homepage |
+| wildz.com | GB | Tier 3 ✅ 2 banners |
+
+## Needs Tier 4 (Hard Datacenter Block)
+
+Sites returning completely blank page (0 title, 0 body, 0 images) through datacenter proxy.
+These are NOT code bugs — they need `RES_PROXY_*` env vars configured.
+- 888casino.com, casinodays.com, mrgreen.com, playmojo.com
+
+---
+
+# Claude Behavior Rules
+## These apply to every session in this project.
+
+---
+
+## 1. Auto-Deploy Every Change
+
+**After every file edit or creation, immediately run all 3 steps:**
+```bash
+# Step 1: commit + push (triggers Vercel auto-deploy)
+git add <changed files>
+git commit -m "clear description of what changed"
+git push origin main
+
+# Step 2: deploy Cloud Run
+powershell -ExecutionPolicy Bypass -Command "& 'C:\Users\User\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd' builds submit --config cloudbuild.yaml --project formidable-sol-490711-f0 2>&1"
+```
+
+- Do not wait for the user to ask
+- Do not batch multiple changes into one commit — commit as you go
+- Use clear, specific commit messages (not "update files")
+- Always co-author: `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`
+
+---
+
+## 2. Screenshot-Driven Development
+
+**For any UI change (web/ directory):**
+1. Start the dev server if not running: `cd web && npm run dev` (background, port 3000)
+2. Take a screenshot of the relevant page/component
+3. Make the change
+4. Take another screenshot to verify it looks correct
+5. If it looks wrong — iterate until it looks right before moving on
+6. Never rely on the user to spot visual bugs
+
+**Dev server:** `http://localhost:3000` (frontend) / `http://localhost:3001` (backend)
+
+---
+
+## 3. Token-Saving: Read Only Relevant Files
+
+**Before reading files, run:**
+```bash
+node scripts/find-relevant.js "<keyword>" --show-lines
+```
+
+This returns only the files that actually contain the relevant code. Read those files. Do not scan the whole codebase.
+
+**Examples:**
+```bash
+node scripts/find-relevant.js "validatePageSuccess" --show-lines
+node scripts/find-relevant.js "carousel" --type ts
+node scripts/find-relevant.js "workingGeo" --show-lines
+```
+
+---
+
+## 4. Coding Standards
+
+### Do
+- Make small, focused changes — one feature or fix per commit
+- Add loading and error states for every async operation
+- Use environment variables for all URLs, credentials, and config values
+- Keep files under ~400 lines — split if larger
+- Explain decisions briefly in comments when logic isn't obvious
+
+### Don't
+- Don't add features beyond what was asked
+- Don't refactor surrounding code when fixing a bug
+- Don't add error handling for impossible scenarios
+- Don't create abstractions for one-time patterns (3 similar lines > premature abstraction)
+- Don't leave `console.log` statements in production code
+- Don't hardcode proxy credentials, URLs, or config values
+- Don't call external services (Drive, n8n, Oxylabs) directly from the Next.js frontend
+
+---
+
+## 5. Error Handling Pattern
+
+Every fetch call in the web UI should follow this pattern:
+```tsx
+const [data,    setData]    = useState(null);
+const [loading, setLoading] = useState(false);
+const [error,   setError]   = useState<string | null>(null);
+
+const load = async () => {
+  setLoading(true);
+  setError(null);
+  try {
+    const res = await fetch('/api/...');
+    if (!res.ok) throw new Error(`Failed (${res.status})`);
+    setData(await res.json());
+  } catch (e) {
+    setError(e instanceof Error ? e.message : 'Something went wrong');
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+---
+
+## Token-Saving Setup
+
+### `.claudeignore` (project root)
+```
+node_modules/
+dist/
+.next/
+build/
+out/
+package-lock.json
+bun.lockb
+yarn.lock
+pnpm-lock.yaml
+*.min.js
+*.min.css
+*.map
+output/
+screenshots/
+*.log
+```
+
+### `scripts/find-relevant.js`
+```js
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const args      = process.argv.slice(2);
+const keyword   = args.find(a => !a.startsWith('--'));
+const showLines = args.includes('--show-lines');
+const typeFlag  = args.indexOf('--type');
+const extFilter = typeFlag !== -1 ? `.${args[typeFlag + 1]}` : null;
+
+if (!keyword) {
+  console.error('Usage: node scripts/find-relevant.js <keyword> [--show-lines] [--type ts|tsx|js]');
+  process.exit(1);
+}
+
+const SKIP_DIRS  = new Set(['node_modules','dist','.next','build','out','.git','coverage','output','screenshots']);
+const SEARCH_EXTS = new Set(['.ts','.tsx','.js','.jsx','.mjs','.json','.md','.env']);
+const results = [];
+
+function walk(dir) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') && entry.name !== '.env') continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) { if (!SKIP_DIRS.has(entry.name)) walk(full); continue; }
+    const ext = path.extname(entry.name).toLowerCase();
+    if (extFilter && ext !== extFilter) continue;
+    if (!SEARCH_EXTS.has(ext)) continue;
+    try { if (fs.statSync(full).size > 300_000) continue; } catch { continue; }
+    let content;
+    try { content = fs.readFileSync(full, 'utf8'); } catch { continue; }
+    const re = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    if (!re.test(content)) continue;
+    const matchLines = [];
+    content.split('\n').forEach((line, i) => { if (re.test(line)) matchLines.push({ n: i+1, text: line.trim() }); });
+    results.push({ file: path.relative(process.cwd(), full), lines: matchLines });
+  }
+}
+
+walk(process.cwd());
+if (results.length === 0) { console.log(`No files found containing "${keyword}"`); process.exit(0); }
+results.sort((a, b) => b.lines.length - a.lines.length);
+console.log(`\nFiles relevant to "${keyword}" (${results.length} found):\n`);
+for (const r of results) {
+  console.log(`  ${r.file}  (${r.lines.length} match${r.lines.length !== 1 ? 'es' : ''})`);
+  if (showLines) {
+    for (const l of r.lines.slice(0, 5)) console.log(`    L${l.n}: ${l.text.slice(0, 120)}`);
+    if (r.lines.length > 5) console.log(`    … and ${r.lines.length - 5} more`);
+  }
+}
+console.log('\nTip: Read only these files to save tokens.');
+```
+
+---
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Start backend (dev) | `powershell -ExecutionPolicy Bypass -Command "cd 'C:\Users\User\Desktop\BannerScrapper'; npm run server"` |
+| Start frontend (dev) | `powershell -ExecutionPolicy Bypass -Command "cd 'C:\Users\User\Desktop\BannerScrapper\web'; npm run dev"` |
+| Start both | `powershell -ExecutionPolicy Bypass -Command "cd 'C:\Users\User\Desktop\BannerScrapper'; npm run app"` |
+| Scrape a URL (CLI) | `powershell -ExecutionPolicy Bypass -Command "cd 'C:\Users\User\Desktop\BannerScrapper'; npx ts-node src/index.ts https://site.com"` |
+| Debug scrape | `powershell -ExecutionPolicy Bypass -Command "cd 'C:\Users\User\Desktop\BannerScrapper'; npx ts-node src/debug.ts https://site.com --proxy --geo=gb"` |
+| Find relevant files | `node scripts/find-relevant.js "keyword" --show-lines` |
+| Deploy Cloud Run | `powershell -ExecutionPolicy Bypass -Command "& 'C:\Users\User\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd' builds submit --config cloudbuild.yaml --project formidable-sol-490711-f0 2>&1"` |
+| Build frontend | `cd web && npm run build` |
+| Deploy frontend | `git push` (auto-deploys via Vercel) |
+
+---
+
+## HTTP Server Endpoints (PORT=8080 in production, 3001 in dev)
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /scrape-stream?urls=url1,url2&geo=XX` | SSE real-time progress |
+| `POST /scrape` | Blocking JSON response `{ urls: [...], geo: "XX" }` |
+| `GET /sites` | Return sites.json |
+| `PUT /sites/:domain` | Update entry (e.g. change workingGeo) |
+| `DELETE /sites/:domain` | Reset site from memory |
+| `GET /banners/:domain/:filename` | Serve scraped banner images |
+| `POST /analyze-prompts` | Forward to n8n webhook for AI analysis |
+| `GET /health` | Health check |
+
 ---
 
 ## Development Workflow with Claude
 
-1. Claude reads this `claude.md` to understand the full project
-2. Claude writes/modifies code in `/home/claude/casino-banner-scraper/`
-3. Claude runs the scraper against a test site
-4. Claude inspects debug screenshots using `view` tool at every tier transition
-5. Claude verifies: Did the right tier succeed? Are the failure detections accurate?
-6. Claude checks banner results: Right images? Missed any? False positives?
-7. Claude fixes the code and re-runs
-8. Repeat until perfect results across multiple test sites
-9. Claude packages the final code for Cloud Run deployment
+1. Claude reads this `CLAUDE.md` to understand the full project
+2. Find relevant files: `node scripts/find-relevant.js "<keyword>" --show-lines`
+3. Read only the relevant files (not the whole codebase)
+4. Run the scraper against a test site, inspect debug screenshots at every tier transition
+5. Verify: Did the right tier succeed? Are failure detections accurate? Right banners captured?
+6. Fix the code and re-run
+7. Repeat until correct results across multiple test sites
+8. Auto-deploy: git commit + push + Cloud Run build
 
 ---
 
@@ -593,15 +897,48 @@ This is additive — if a page has no layered containers the code path is skippe
 
 - [ ] Tier 1 (vanilla) works for simple, unprotected sites
 - [ ] Tier 2 (stealth) handles basic bot detection
-- [ ] Tier 3 (datacenter proxy) handles IP-based blocks
+- [ ] Tier 3 (datacenter proxy) handles IP-based blocks with auto-geo detection
 - [ ] Tier 4 (residential proxy) handles geo-restrictions and heavy Cloudflare
 - [ ] Failure detection accurately identifies block type and escalates appropriately
-- [ ] Site memory persists and is used on subsequent runs
+- [ ] `hard_blocked` pages skip geo cycling and escalate tier immediately
+- [ ] Site memory persists tier + geo and is used on subsequent runs
 - [ ] Correctly identifies and downloads banner images only (no logos, icons, game tiles)
+- [ ] Banner score threshold (14) filters game tile false positives
 - [ ] Navigates to promotions page automatically
-- [ ] Handles carousels/sliders to get all banner slides
+- [ ] Handles carousels/sliders to get all banner slides (progressive per-slide detection)
+- [ ] Progressive scroll capture handles lazy-loaded promo grids (2.5s dwell)
 - [ ] Screenshots at each step allow Claude to verify correctness
 - [ ] Runs in Docker container suitable for Cloud Run
-- [ ] Outputs images with metadata to GCS or n8n webhook
+- [ ] Uploads images to Google Drive + sends to n8n webhook
 - [ ] Handles at least 90% of target casino sites without manual intervention
-- [ ] Cost-efficient: majority of sites resolve at Tier 1 or 2 without proxy costs
+- [ ] Cost-efficient: majority of sites resolve at Tier 1-2 without proxy costs
+- [ ] 15s inter-site cooldown prevents Oxylabs rate-limiting
+
+---
+
+## Company GitHub Workflows
+
+Copy these into every new project under `.github/workflows/`.
+
+### `.github/workflows/auto-assign.yml`
+```yaml
+name: Auto Assign
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+    - name: 'Auto-assign issue'
+      uses: pozil/auto-assign-issue@v1
+      with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          assignees: optinet-solutions-sandbx
+          numOfAssignee: 1
+```
