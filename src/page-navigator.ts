@@ -24,6 +24,17 @@ const PROMO_PATH_GUESSES = [
   '/tl/static/promos', '/tl/promotions', '/tl/promos',
   '/ph/promotions', '/ph/promos',
   '/casino/promotions', '/casino/bonuses',
+  '/all-promotions', '/free-spins', '/free-spin', '/tournament', '/tournaments',
+  '/vip', '/loyalty', '/cashback', '/reload',
+  // More language variants
+  '/fr/promotions', '/fr/promos', '/de/promotions', '/de/promos',
+  '/es/promotions', '/es/promos', '/fi/promotions', '/no/promotions',
+  '/sv/promotions', '/pt/promotions',
+  // Casino section prefixes
+  '/live-casino/promotions', '/live/promotions', '/table/promotions',
+  '/sports/promotions',
+  // Subdirectory patterns (some WP/Drupal casino sites)
+  '/news/promotions', '/pages/promotions', '/content/promotions',
 ];
 
 /** Normalise an origin for comparison — strips www. so that
