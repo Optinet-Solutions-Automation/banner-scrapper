@@ -23,6 +23,7 @@ export interface BannerImage {
   src: string;
   localPath?: string;
   gcsUrl?: string;   // public GCS URL after upload (accessible from anywhere)
+  driveUrl?: string; // public Drive thumbnail URL after upload (accessible from anywhere)
   width: number;
   height: number;
   aspectRatio: number;
