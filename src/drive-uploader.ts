@@ -181,7 +181,7 @@ export async function uploadBannersToDrive(
       existingNames.add(filename);
 
       const h = hashMap.get(banner.localPath!)!;
-      await drive.files.create({
+      const created = await drive.files.create({
         requestBody: {
           name:        filename,
           parents:     [domainFolderId],
@@ -191,7 +191,19 @@ export async function uploadBannersToDrive(
           mimeType: getMimeType(banner.localPath!),
           body:     fs.createReadStream(banner.localPath!),
         },
+        fields: 'id',
       });
+
+      const fileId = created.data.id;
+      if (fileId) {
+        // Make file publicly readable so the UI can display it as a thumbnail
+        await drive.permissions.create({
+          fileId,
+          requestBody: { role: 'reader', type: 'anyone' },
+        });
+        // Store thumbnail URL back on the banner so the UI can use it directly
+        banner.driveUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w800`;
+      }
 
       console.log(`  ☁ Drive: uploaded ${filename}`);
     }
