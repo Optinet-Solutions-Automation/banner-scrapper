@@ -294,7 +294,7 @@ function SiteStatusCard({ site }: { site: SiteStatus }) {
 function LightboxModal({
   banner, domain, onClose,
 }: { banner: BannerImage; domain: string; onClose: () => void }) {
-  const imgUrl = banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
+  const imgUrl = banner.driveUrl || banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
   const displayUrl = imgUrl || banner.src;
 
   useEffect(() => {
@@ -377,7 +377,7 @@ function LightboxModal({
 function BannerCard({
   banner, domain, onOpenLightbox, onExclude, excluded,
 }: { banner: BannerImage; domain: string; onOpenLightbox: () => void; onExclude: () => void; excluded: boolean }) {
-  const imgUrl = banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
+  const imgUrl = banner.driveUrl || banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
   const [loaded, setLoaded] = useState(false);
   const [error, setError]   = useState(false);
 
