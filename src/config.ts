@@ -46,7 +46,7 @@ export const config = {
   tierRecheckDays: parseInt(process.env.TIER_RECHECK_DAYS ?? '7', 10),
   pageTimeout:     parseInt(process.env.PAGE_TIMEOUT      ?? '60000', 10),
   debugScreenshots: (process.env.DEBUG_SCREENSHOTS ?? 'true') === 'true',
-  minBannerWidth:  parseInt(process.env.MIN_BANNER_WIDTH  ?? '600', 10),
+  minBannerWidth:  parseInt(process.env.MIN_BANNER_WIDTH  ?? '500', 10),
   minBannerHeight: parseInt(process.env.MIN_BANNER_HEIGHT ?? '150', 10),
 
   // Paths
