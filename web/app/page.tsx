@@ -138,8 +138,10 @@ function parsePromptSections(prompt: string): PromptSection[] {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function bannerImageUrl(domain: string, localPath?: string): string {
   if (!localPath) return '';
-  const filename = localPath.replace(/\\/g, '/').split('/').pop() ?? '';
-  return `${BACKEND}/banners/${domain}/${filename}`;
+  const parts = localPath.replace(/\\/g, '/').split('/');
+  // Include pageType subdir: output/domain/pageType/filename → pageType/filename
+  const relative = parts.length >= 2 ? parts.slice(-2).join('/') : (parts.pop() ?? '');
+  return `${BACKEND}/banners/${domain}/${relative}`;
 }
 
 function isValidUrl(s: string): boolean {
