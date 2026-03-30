@@ -262,14 +262,24 @@ export async function detectBanners(
 
         const bg = window.getComputedStyle(el).backgroundImage;
         const match = bg.match(/url\(["']?(.+?)["']?\)/);
-        if (!match?.[1] || match[1].startsWith('data:')) return;
-        if (seenBg.has(match[1])) return;
-        seenBg.add(match[1]);
+
+        // Also check data-bg / data-background lazy-loader attributes
+        let bgSrcCandidate = match?.[1];
+        if (!bgSrcCandidate || bgSrcCandidate.startsWith('data:')) {
+          const dataBg = (el as HTMLElement).getAttribute('data-bg')
+            || (el as HTMLElement).getAttribute('data-background')
+            || (el as HTMLElement).getAttribute('data-background-image') || '';
+          if (!dataBg || dataBg.startsWith('data:')) return;
+          bgSrcCandidate = dataBg;
+        }
+
+        if (seenBg.has(bgSrcCandidate)) return;
+        seenBg.add(bgSrcCandidate);
 
         const rect = el.getBoundingClientRect();
         if (rect.width < minW || rect.height < minH) return;
 
-        let bgSrc = match[1];
+        let bgSrc = bgSrcCandidate;
         try { bgSrc = new URL(bgSrc, document.baseURI).href; } catch { /* keep as-is */ }
         const elCls = (el instanceof HTMLElement) ? (el.className ?? '') : '';
         out.push({ src: bgSrc, width: Math.round(rect.width), height: Math.round(rect.height), containerClass: typeof elCls === 'string' ? elCls : '' });
