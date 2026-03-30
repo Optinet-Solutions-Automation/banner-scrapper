@@ -561,6 +561,21 @@ export async function scrapeWithTier(
       if (promoValidation.success) {
         await dismissPopups(page);
 
+        // Some sites render promo content inside tabs on the same page (e.g. tab="Promotions").
+        // If we're still on the same URL, try clicking a promotions tab to reveal content.
+        if (page.url().replace(/\/$/, '') === new URL(url).href.replace(/\/$/, '')) {
+          const promoTab = page.locator(
+            'button:text("Promotions"), [role="tab"]:text("Promotions"), ' +
+            'button:text("Bonuses"), [role="tab"]:text("Bonuses"), ' +
+            'button:text("Offers"), [role="tab"]:text("Offers"), ' +
+            'a[role="tab"]:text-matches(/promo|bonus|offer/i)'
+          ).first();
+          if (await promoTab.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await promoTab.click().catch(() => {});
+            await page.waitForTimeout(2000);
+          }
+        }
+
         emitProgress({ type: 'progress', domain, message: `Promo page loaded — scanning for banners…` });
 
         // Wait for promotional content to load.
