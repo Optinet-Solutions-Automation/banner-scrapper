@@ -2,6 +2,7 @@ import { Page } from 'playwright';
 
 const PROMO_NAV_PATTERNS = [
   /promo/i, /bonus/i, /offer/i, /reward/i, /campaign/i, /deal/i,
+  /free.?spin/i, /tournament/i, /vip/i, /cashback/i, /reload/i,
 ];
 
 // Paths that indicate an action page (claim bonus, login, account) — NOT a promo listing page.
