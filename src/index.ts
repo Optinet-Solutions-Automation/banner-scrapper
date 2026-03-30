@@ -225,18 +225,47 @@ function startHttpServer(port: number) {
       const filename = decodeURIComponent(parts.slice(1).join('/'));
       const filePath = path.join(config.outputDir, domain, filename);
 
+      const ext = path.extname(filename).toLowerCase();
+      const contentType = ({
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.png': 'image/png',  '.webp': 'image/webp',
+        '.gif': 'image/gif',  '.avif': 'image/avif',
+      } as Record<string, string>)[ext] ?? 'application/octet-stream';
+
       if (domain && filename && fs.existsSync(filePath)) {
-        const ext = path.extname(filename).toLowerCase();
-        const contentType = ({
-          '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-          '.png': 'image/png',  '.webp': 'image/webp',
-          '.gif': 'image/gif',  '.avif': 'image/avif',
-        } as Record<string, string>)[ext] ?? 'application/octet-stream';
-        res.writeHead(200, {
-          'Content-Type':  contentType,
-          'Cache-Control': 'public, max-age=3600',
-        });
+        // Serve from local filesystem (same container session)
+        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=3600' });
         fs.createReadStream(filePath).pipe(res);
+      } else if (domain && filename && process.env.GCS_BUCKET) {
+        // Local file gone (container restarted) — proxy from GCS using service account
+        const bucket    = process.env.GCS_BUCKET;
+        const objectKey = encodeURIComponent(`${domain}/${filename}`).replace(/%2F/g, '/');
+        const gcsUrl    = `https://storage.googleapis.com/${bucket}/${objectKey}`;
+        const { default: http2 } = await import('http');
+        // Fetch GCS token from metadata server (service account auth on Cloud Run)
+        const token = await new Promise<string>((resolve) => {
+          const r = http2.get({
+            host: 'metadata.google.internal',
+            path: '/computeMetadata/v1/instance/service-accounts/default/token',
+            headers: { 'Metadata-Flavor': 'Google' },
+          }, (mr) => {
+            let d = '';
+            mr.on('data', c => d += c);
+            mr.on('end', () => { try { resolve(JSON.parse(d).access_token ?? ''); } catch { resolve(''); } });
+          });
+          r.on('error', () => resolve(''));
+        });
+        if (!token) { res.writeHead(404); res.end('{}'); return; }
+        https.get(gcsUrl, { headers: { Authorization: `Bearer ${token}` } }, (gcsRes) => {
+          if (gcsRes.statusCode !== 200) {
+            gcsRes.resume();
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Image not found in GCS' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=86400' });
+          gcsRes.pipe(res);
+        }).on('error', () => { res.writeHead(502); res.end('{}'); });
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not found' }));
