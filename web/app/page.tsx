@@ -29,6 +29,7 @@ interface BannerImage {
   src: string;
   localPath?: string;
   gcsUrl?: string;
+  driveUrl?: string;
   width: number;
   height: number;
   aspectRatio: number;
