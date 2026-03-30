@@ -195,7 +195,7 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
       result.tier,
       result.geo ?? '',
       allBanners.length,
-      driveResult
+      driveResult?.folderUrl ?? null
     );
   }
 
