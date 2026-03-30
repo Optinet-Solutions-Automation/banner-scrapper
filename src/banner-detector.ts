@@ -171,7 +171,10 @@ export async function detectBanners(
           const lazy =
             img.getAttribute('data-src') ||
             img.getAttribute('data-lazy') ||
-            img.getAttribute('data-original') || '';
+            img.getAttribute('data-original') ||
+            img.getAttribute('data-bg') ||
+            img.getAttribute('data-background') ||
+            img.getAttribute('data-background-image') || '';
           if (!lazy || lazy.startsWith('data:')) {
             // Last resort: parse srcset for first real URL.
             // Handles Next.js <Image> not yet hydrated — currentSrc is data: blur placeholder
