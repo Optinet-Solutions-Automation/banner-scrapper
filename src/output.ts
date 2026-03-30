@@ -155,6 +155,8 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
   const hasGCS = !!process.env.GCS_BUCKET;
   const hasN8n = !!config.n8nWebhookUrl;
   const hasWA  = !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_RECIPIENT);
+  const hasDrive = !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID &&
+    (process.env.GOOGLE_OAUTH2_REFRESH_TOKEN || process.env.GOOGLE_SERVICE_ACCOUNT_KEY));
 
   const allBanners = [...result.homepageBanners, ...result.promoBanners];
 
@@ -170,11 +172,19 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
     }
   }
 
-  // Google Drive upload is now manual — triggered via POST /upload-to-drive.
+  // ── Google Drive upload (automatic) ─────────────────────────────────────
+  let driveResult: { folderId: string; folderUrl: string } | null = null;
+  if (hasDrive && allBanners.length > 0) {
+    const { uploadBannersToDrive } = await import('./drive-uploader');
+    driveResult = await uploadBannersToDrive(allBanners, result.domain);
+    if (driveResult) {
+      console.log(`  ☁ Drive folder: ${driveResult.folderUrl}`);
+    }
+  }
 
   // ── n8n webhook ──────────────────────────────────────────────────────────
   if (hasN8n) {
-    await sendToN8n(result, null);
+    await sendToN8n(result, driveResult);
   }
 
   // ── WhatsApp notification ────────────────────────────────────────────────
@@ -185,11 +195,11 @@ export async function deliverOutput(result: ScrapeResult): Promise<void> {
       result.tier,
       result.geo ?? '',
       allBanners.length,
-      null
+      driveResult
     );
   }
 
-  if (!hasGCS && !hasN8n && !hasWA) {
+  if (!hasGCS && !hasDrive && !hasN8n && !hasWA) {
     console.log(`  ℹ Images saved locally to output/${result.domain}/`);
   }
 }
