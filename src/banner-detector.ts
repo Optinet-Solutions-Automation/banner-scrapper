@@ -293,7 +293,7 @@ export async function detectBanners(
         '[class*="banner"],[class*="hero"],[class*="slider"],[class*="carousel"],' +
         '[class*="promo"],[class*="swiper"],[class*="slick"],[class*="spotlight"],' +
         '[class*="feature"],[class*="offer"],[class*="welcome"],[class*="billboard"],' +
-        '[class*="slide"]'
+        '[class*="slide"],[data-bg],[data-background],[data-background-image]'
       ));
       for (const el of targeted) tryAdd(el);
 
