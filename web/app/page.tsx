@@ -378,9 +378,19 @@ function LightboxModal({
 function BannerCard({
   banner, domain, onOpenLightbox, onExclude, excluded,
 }: { banner: BannerImage; domain: string; onOpenLightbox: () => void; onExclude: () => void; excluded: boolean }) {
-  const imgUrl = banner.driveUrl || banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
+  const primaryUrl = banner.driveUrl || banner.gcsUrl || bannerImageUrl(domain, banner.localPath) || banner.src;
+  const [imgSrc, setImgSrc] = useState(primaryUrl);
   const [loaded, setLoaded] = useState(false);
   const [error, setError]   = useState(false);
+
+  const handleError = () => {
+    // If backend URL failed, fall back to original casino CDN URL
+    if (imgSrc !== banner.src && banner.src) {
+      setImgSrc(banner.src);
+    } else {
+      setError(true);
+    }
+  };
 
   return (
     <div className={`group relative rounded-lg overflow-hidden border transition-all duration-200 bg-surface-2 cursor-pointer ${excluded ? 'opacity-30 border-red-900/50' : 'border-border hover:border-accent'}`}>
