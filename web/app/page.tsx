@@ -383,7 +383,7 @@ function LightboxModal({
 function BannerCard({
   banner, domain, onOpenLightbox, onExclude, excluded,
 }: { banner: BannerImage; domain: string; onOpenLightbox: () => void; onExclude: () => void; excluded: boolean }) {
-  const primaryUrl = banner.driveUrl || banner.gcsUrl || bannerImageUrl(domain, banner.localPath) || banner.src;
+  const primaryUrl = banner.driveUrl || bannerImageUrl(domain, banner.localPath) || banner.gcsUrl || banner.src;
   const [imgSrc, setImgSrc] = useState(primaryUrl);
   const [loaded, setLoaded] = useState(false);
   const [error, setError]   = useState(false);
