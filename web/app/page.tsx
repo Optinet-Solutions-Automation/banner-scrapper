@@ -295,8 +295,12 @@ function SiteStatusCard({ site }: { site: SiteStatus }) {
 function LightboxModal({
   banner, domain, onClose,
 }: { banner: BannerImage; domain: string; onClose: () => void }) {
-  const imgUrl = banner.driveUrl || banner.gcsUrl || bannerImageUrl(domain, banner.localPath);
-  const displayUrl = imgUrl || banner.src;
+  const primaryUrl = banner.driveUrl || banner.gcsUrl || bannerImageUrl(domain, banner.localPath) || banner.src;
+  const [displayUrl, setDisplayUrl] = useState(primaryUrl);
+
+  const handleLightboxError = () => {
+    if (displayUrl !== banner.src && banner.src) setDisplayUrl(banner.src);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
