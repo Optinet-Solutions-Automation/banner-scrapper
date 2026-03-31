@@ -262,48 +262,20 @@ async function captureLayeredComposites(
   const composites: BannerImage[] = [];
   for (let n = 1; n <= layeredCount; n++) {
     try {
-      // Get element dimensions before moving it (works even when off-screen)
-      const { w, h } = await page.evaluate((idx) => {
-        const el = document.querySelector(`[data-bannerbot-layered="${idx}"]`) as HTMLElement | null;
-        if (!el) return { w: 0, h: 0 };
-        const r = el.getBoundingClientRect();
-        return {
-          w: Math.round(r.width  || el.offsetWidth),
-          h: Math.round(r.height || el.offsetHeight),
-        };
-      }, n);
+      const locator = page.locator(`[data-bannerbot-layered="${n}"]`).first();
+
+      // Scroll the element into view so both layers are rendered correctly
+      await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(300);
+
+      // Use element-level screenshot — captures only this element's bounding box,
+      // no page chrome, no navbar overlay (unlike page.screenshot + clip)
+      const buf = await locator.screenshot({ timeout: 8000 });
+
+      const box = await locator.boundingBox().catch(() => null);
+      const w = box ? Math.round(box.width) : 0;
+      const h = box ? Math.round(box.height) : 0;
       if (w < 100 || h < 50) continue;
-
-      // Force-show at viewport origin so the back+front layers composite correctly
-      await page.evaluate((args) => {
-        const el = document.querySelector(`[data-bannerbot-layered="${args.n}"]`) as HTMLElement | null;
-        if (!el) return;
-        el.dataset.banbotOrig = el.getAttribute('style') ?? '';
-        const parts = [
-          'position: fixed', 'top: 0', 'left: 0',
-          'transform: none', 'opacity: 1', 'visibility: visible',
-          `width: ${args.w}px`, `height: ${args.h}px`,
-          'z-index: 99999', 'pointer-events: none',
-        ];
-        el.style.cssText = parts.join(' !important; ') + ' !important';
-      }, { n, w, h });
-
-      // Brief repaint pause
-      await page.waitForTimeout(150);
-
-      // Clip screenshot to (0, 0, w, h) — our element is now there at z=99999
-      const buf = await page.screenshot({
-        clip: { x: 0, y: 0, width: w, height: h },
-        timeout: 5000,
-      });
-
-      // Restore original style
-      await page.evaluate((idx) => {
-        const el = document.querySelector(`[data-bannerbot-layered="${idx}"]`) as HTMLElement | null;
-        if (!el) return;
-        el.setAttribute('style', el.dataset.banbotOrig ?? '');
-        delete el.dataset.banbotOrig;
-      }, n);
 
       const fileIdx = existingCount + composites.length + 1;
       const filepath = path.join(dir, `banner_${String(fileIdx).padStart(2, '0')}.png`);
@@ -322,14 +294,6 @@ async function captureLayeredComposites(
       console.log(`    ✓ Layered composite ${n}/${layeredCount}: ${w}×${h}`);
     } catch (err) {
       console.warn(`    ⚠ Composite ${n}/${layeredCount} failed: ${(err as Error).message.split('\n')[0]}`);
-      // Best-effort style restore on error
-      await page.evaluate((idx) => {
-        const el = document.querySelector(`[data-bannerbot-layered="${idx}"]`) as HTMLElement | null;
-        if (el?.dataset?.banbotOrig !== undefined) {
-          el.setAttribute('style', el.dataset.banbotOrig ?? '');
-          delete el.dataset.banbotOrig;
-        }
-      }, n).catch(() => {});
     }
   }
   return composites;
