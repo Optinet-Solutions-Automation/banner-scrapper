@@ -295,7 +295,7 @@ function SiteStatusCard({ site }: { site: SiteStatus }) {
 function LightboxModal({
   banner, domain, onClose,
 }: { banner: BannerImage; domain: string; onClose: () => void }) {
-  const primaryUrl = banner.driveUrl || banner.gcsUrl || bannerImageUrl(domain, banner.localPath) || banner.src;
+  const primaryUrl = banner.driveUrl || bannerImageUrl(domain, banner.localPath) || banner.gcsUrl || banner.src;
   const [displayUrl, setDisplayUrl] = useState(primaryUrl);
 
   const handleLightboxError = () => {
