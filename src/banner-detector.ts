@@ -461,6 +461,30 @@ export async function detectLayeredContainers(
       }
       if (isOverlay) continue;
 
+      // Skip carousel/slider containers — they have multiple abs-positioned slides
+      // that look like layered images but are actually sequential slides (not composites).
+      // Check the candidate itself and up to 4 ancestors for carousel class names.
+      const CAROUSEL_KEYWORDS = ['swiper', 'slick', 'owl', 'glide', 'splide', 'carousel', 'slider'];
+      let isCarousel = false;
+      let checkEl: Element | null = candidate;
+      for (let d = 0; d < 5; d++) {
+        if (!checkEl) break;
+        const cls = (checkEl.getAttribute('class') || '').toLowerCase();
+        if (CAROUSEL_KEYWORDS.some(k => cls.includes(k))) { isCarousel = true; break; }
+        checkEl = checkEl.parentElement;
+      }
+      if (isCarousel) continue;
+
+      // Also skip if the candidate's children images are CSS-transformed off-screen
+      // (translateX) — that's carousel slide positioning, not layered compositing.
+      const hasCarouselTransforms = (candidateAbsImgs as HTMLImageElement[]).some(i => {
+        const t = window.getComputedStyle(i as Element).transform;
+        if (!t || t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)') return false;
+        // Any non-identity transform on an absolutely-positioned img = carousel slide
+        return true;
+      });
+      if (hasCarouselTransforms) continue;
+
       seenContainers.add(candidate);
       candidate.setAttribute('data-bannerbot-layered', String(++count));
 
