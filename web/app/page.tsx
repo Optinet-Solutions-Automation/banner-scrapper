@@ -422,10 +422,10 @@ function BannerCard({
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={imgUrl || banner.src}
+              src={imgSrc}
               alt={banner.altText ?? `Banner ${banner.width}×${banner.height}`}
               onLoad={() => setLoaded(true)}
-              onError={() => setError(true)}
+              onError={handleError}
               className={`w-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
               style={{ aspectRatio: `${Math.min(banner.aspectRatio, 4)} / 1` }}
             />
