@@ -241,11 +241,9 @@ function deduplicateByIdentity<T extends { src: string; width: number; height: n
 /** Screenshots each layered container (tagged with data-bannerbot-layered="N")
  *  as a single composed image and saves it to the output directory.
  *
- *  Problem: inactive carousel slides are CSS-transformed off-screen
- *  (e.g. translateX(-1160px)), so locator.screenshot() captures the wrong
- *  viewport position. Fix: temporarily force each container to
- *  position:fixed top:0 left:0 so the browser renders it at the viewport
- *  origin, then take a page clip screenshot. Restores original style after. */
+ *  Uses locator.screenshot() which captures only the element's bounding box —
+ *  no page chrome, no navbar overlay. Scrolls element into view first so both
+ *  CSS layers render correctly before capture. */
 async function captureLayeredComposites(
   page: Page,
   pageType: 'homepage' | 'promotions',
