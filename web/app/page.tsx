@@ -364,6 +364,7 @@ function LightboxModal({
             <img
               src={displayUrl}
               alt={banner.altText ?? `Banner ${banner.width}×${banner.height}`}
+              onError={handleLightboxError}
               className="max-w-full max-h-[70vh] object-contain rounded-lg"
             />
           </div>
